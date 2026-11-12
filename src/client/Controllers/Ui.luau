@@ -108,10 +108,11 @@ function Ui.button(text: string, color: Color3, onClick: () -> (), props: { [str
 	Ui.new("UITextSizeConstraint", { MaxTextSize = (props and props.MaxTextSize) or 26, Parent = b })
 	Ui.new("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
 		PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = b })
+	local scale = Ui.new("UIScale", { Parent = b })
 	b.Activated:Connect(function()
-		local s = b.Size
-		TweenService:Create(b, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true),
-			{ Size = UDim2.new(s.X.Scale * 0.94, s.X.Offset * 0.94, s.Y.Scale * 0.94, s.Y.Offset * 0.94) }):Play()
+		scale.Scale = 1
+		TweenService:Create(scale, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true),
+			{ Scale = 0.92 }):Play()
 		onClick()
 	end)
 	return b

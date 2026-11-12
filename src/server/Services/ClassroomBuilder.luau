@@ -140,7 +140,7 @@ local function buildShell()
 	local clock = part({ ClassName = "Part", Name = "Clock", Shape = Enum.PartType.Cylinder,
 		Size = Vector3.new(0.5, 6, 6), CFrame = CFrame.new(38, 22, -hz + 0.3) * CFrame.Angles(0, math.rad(90), 0),
 		Color = rgb(255, 255, 255), CanCollide = false })
-	label(clock, Enum.NormalId.Right, "⏰", { Color = rgb(30, 30, 40) })
+	label(clock, Enum.NormalId.Left, "⏰", { Color = rgb(30, 30, 40) })
 
 	-- Paint splats on the floor
 	local splatColors = { rgb(255, 90, 95), rgb(60, 170, 255), rgb(255, 220, 60), rgb(150, 100, 255) }
