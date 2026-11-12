@@ -178,7 +178,10 @@ function MatchCore.submit(self, userId: number, step: any, kind: any, content: a
 		auto = false,
 	}
 	self.submitted[userId] = true
-	self.activeSubmissions[userId] += 1
+	-- Blank pages don't count toward the participation requirement (anti-AFK).
+	if kind ~= "Draw" or not self.opts.isBlankDrawing(value) then
+		self.activeSubmissions[userId] += 1
+	end
 	return true, nil
 end
 
