@@ -1,0 +1,38 @@
+{
+  "name": "DoodleDisaster",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": { "$path": "src/shared" }
+    },
+    "ServerScriptService": {
+      "Server": { "$path": "src/server" }
+    },
+    "ServerStorage": {
+      "Tests": { "$path": "tests" }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": { "$path": "src/client" }
+      },
+      "$properties": {
+        "CameraMaxZoomDistance": 128,
+        "CameraMinZoomDistance": 0.5
+      }
+    },
+    "Workspace": {
+      "$properties": {
+        "Gravity": 196.2
+      }
+    },
+    "Lighting": {
+      "$properties": {
+        "Brightness": 2.5,
+        "ClockTime": 13.5,
+        "GlobalShadows": true,
+        "Ambient": [0.55, 0.5, 0.6],
+        "OutdoorAmbient": [0.6, 0.55, 0.65]
+      }
+    }
+  }
+}
