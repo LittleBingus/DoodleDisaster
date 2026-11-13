@@ -10,6 +10,7 @@
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.GameConfig)
@@ -31,10 +32,14 @@ export type Profile = {
 local SCHEMA_VERSION = 1
 local MAX_RETRIES = 3
 
+-- The only place a progression store is chosen: Studio sessions get their own store.
+local STORE_NAME = if RunService:IsStudio() then GameConfig.StudioDataStoreName else GameConfig.DataStoreName
+PlayerDataManager.StoreName = STORE_NAME
+
 local store: DataStore? = nil
 do
 	local ok, result = pcall(function()
-		return DataStoreService:GetDataStore(GameConfig.DataStoreName)
+		return DataStoreService:GetDataStore(STORE_NAME)
 	end)
 	if ok then
 		store = result
@@ -274,6 +279,7 @@ local function onPlayerAdded(player: Player)
 end
 
 function PlayerDataManager.init()
+	print("[PlayerData] using DataStore " .. STORE_NAME)
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, p in Players:GetPlayers() do
 		task.spawn(onPlayerAdded, p)

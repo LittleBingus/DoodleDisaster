@@ -20,6 +20,11 @@ return function(t)
 		t.eq(cfg.AwardBonus, 5)
 	end)
 
+	t.test("studio and production progression stores are distinct", function()
+		t.eq(GameConfig.DataStoreName, "DoodleDisaster_PlayerData_v1")
+		t.eq(GameConfig.StudioDataStoreName, "DoodleDisaster_PlayerData_Dev_v1")
+	end)
+
 	t.test("full phase loop is allowed and returns to the lobby", function()
 		local path = { "WaitingForPlayers", "Countdown", "StartingMatch", "Drawing", "CollectingSubmissions", "Guessing",
 			"CollectingSubmissions", "Drawing", "CollectingSubmissions", "Reveal", "AwardVoting", "Results",

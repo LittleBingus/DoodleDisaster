@@ -93,7 +93,10 @@ GameConfig.CustomPrompts = {
 	DeveloperProductId = nil :: number?,
 }
 
+-- Player progression stores. The server picks one in PlayerDataManager using
+-- RunService:IsStudio(), so Studio playtests never read or write live progression.
 GameConfig.DataStoreName = "DoodleDisaster_PlayerData_v1"
+GameConfig.StudioDataStoreName = "DoodleDisaster_PlayerData_Dev_v1"
 GameConfig.AutosaveInterval = 120
 
 return GameConfig
