@@ -139,6 +139,9 @@ event. One client was driven by real mouse and keyboard input instead.
 | Drawing UI with real mouse input: strokes land under the pointer, colour, brush size, Undo, Done | Pass |
 | Guess UI with real keyboard input, Enter to submit | Pass |
 | Ballot UI: own entry not clickable, valid vote accepted, moves to next category | Pass |
+| 4 players: 4 steps, every sketchbook ends on a guess, rewards paid | Pass |
+| 8 players: 8 sketchbooks of 8 entries, every book ends on a guess, ballot capped at 8 candidates per category, rewards paid | Pass |
+| Classroom interactions (chalkboard, paper toss, suspicious button, golden pencil) | Pass |
 | Unit tests in a fresh server context | 65 passed, 0 failed |
 
 Bugs found and fixed during these runs:
@@ -148,6 +151,8 @@ Bugs found and fixed during these runs:
   now carry `matchId`.
 * When a match produced nothing to vote on, clients were never told and the results screen
   showed the previous match. The server now sends empty results.
+* A winner who left before results was shown as "A mysterious artist"; names are now
+  remembered for the session (fix not yet re-tested with a leaver).
 
 Testing notes:
 
@@ -159,11 +164,13 @@ Testing notes:
 
 ## Open issues
 
-1. A winner who left before results is shown as "A mysterious artist".
+1. During the reveal on a narrow window the camera pushes the suspicious button off-screen, so its prompt is hidden until the reveal ends.
 2. On a narrow window (about 800 px wide) the drawing tool buttons are only about 22 px tall.
 3. Pack purchase, pack toggling and milestone unlocks have not been exercised.
-4. Classroom interactions, touch input, gamepad and private-server host flow have not been exercised.
-5. `rojo serve` and Studio must both be running; nothing checks this automatically.
+4. Touch input, gamepad, the private-server host flow and late-joiner spectating have not been exercised.
+5. 6 players was not run separately (3, 4 and 8 were); rotation is unit-tested for 1 to 8.
+6. `rojo serve` and Studio must both be running; nothing checks this automatically.
+7. A 4-client test session once started with only 3 clients (the fourth closed while loading); relaunching worked.
 
 ## Feature status
 
@@ -182,7 +189,7 @@ Testing notes:
 | Mid-match disconnect | Verified |
 | Late joiner spectating | Not exercised (a test session cannot add a client mid-run) |
 | Pack unlock, toggle, milestones | Present, not exercised |
-| Classroom interactions | Present, not exercised |
+| Classroom interactions | Verified |
 | Touch and gamepad input, private-server host flow | Present, not exercised |
-| 4, 6 and 8 players | See multiplayer verification; rotation is unit-tested for 1 to 8 |
+| 3, 4 and 8 players | Verified in play; 6 not run; rotation is unit-tested for 1 to 8 |
 | Custom prompts, purchases | Disabled by design |
