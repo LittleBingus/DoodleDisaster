@@ -4,39 +4,56 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterPlayer = game:GetService("StarterPlayer")
 
 local Phases = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Phases"))
 local ClientState = require(script.Parent.ClientState)
 
 local MovementController = {}
 
-local controls: any = nil
+local playerModule: any = nil
 
-local function getControls()
-	if controls then
-		return controls
+-- Roblox ships PlayerModule at StarterPlayer.PlayerModule; older layouts cloned it into
+-- PlayerScripts. Never yields: apply() runs again on every state change, so a module that
+-- isn't there yet is picked up later.
+local function getPlayerModule(): any
+	if playerModule then
+		return playerModule
 	end
-	local ok, result = pcall(function()
-		local playerModule = require(Players.LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule") :: ModuleScript)
-		return (playerModule :: any):GetControls()
-	end)
-	if ok then
-		controls = result
+	local playerScripts = Players.LocalPlayer:FindFirstChild("PlayerScripts")
+	local module = StarterPlayer:FindFirstChild("PlayerModule")
+		or (playerScripts and playerScripts:FindFirstChild("PlayerModule"))
+	if module and module:IsA("ModuleScript") then
+		local ok, result = pcall(require, module)
+		if ok and type(result) == "table" then
+			playerModule = result
+		end
 	end
-	return controls
+	return playerModule
+end
+
+local function setControlsEnabled(enabled: boolean)
+	local module = getPlayerModule()
+	if not module then
+		return
+	end
+	local controlModule = module.ControlModule
+	if type(controlModule) == "table" and type(controlModule.Enabled) == "boolean" then
+		controlModule.Enabled = enabled
+	elseif type(module.GetControls) == "function" then
+		-- Legacy PlayerModule API.
+		local controls = module:GetControls()
+		if enabled then
+			controls:Enable()
+		else
+			controls:Disable()
+		end
+	end
 end
 
 local function apply()
-	local c = getControls()
-	if not c then
-		return
-	end
 	local seated = Phases.Seated[ClientState.phase()] == true and ClientState.isParticipant()
-	if seated then
-		c:Disable()
-	else
-		c:Enable()
-	end
+	setControlsEnabled(not seated)
 end
 
 function MovementController.start()
