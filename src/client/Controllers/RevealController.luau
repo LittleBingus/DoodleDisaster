@@ -25,6 +25,29 @@ local projector: View?
 local hideButton: TextButton
 local overlayHidden = false
 local floatLayer: Frame
+local skipBar: Frame
+local skipEntryButton: TextButton
+local skipBookButton: TextButton
+local skipState = { entrySeq = -1, bookSeq = -1, votedEntry = false, votedBook = false }
+
+local function refreshSkip(status: any?)
+	if status then
+		if status.entrySeq ~= skipState.entrySeq then
+			skipState.entrySeq = status.entrySeq
+			skipState.votedEntry = false
+		end
+		if status.bookSeq ~= skipState.bookSeq then
+			skipState.bookSeq = status.bookSeq
+			skipState.votedBook = false
+		end
+		skipEntryButton.Text = string.format("⏩ Skip %d/%d", status.entry, status.needed)
+		skipBookButton.Text = string.format("⏭ Next book %d/%d", status.book, status.needed)
+	end
+	skipEntryButton.BackgroundColor3 = if skipState.votedEntry then T.Grey else T.Orange
+	skipBookButton.BackgroundColor3 = if skipState.votedBook then T.Grey else T.Blue
+	-- Only people who played this match can vote; spectators just watch.
+	skipBar.Visible = ClientState.isParticipant()
+end
 
 local function makeView(parent: Instance, isProjector: boolean): View
 	local root = if isProjector
@@ -157,6 +180,29 @@ function RevealController.start()
 		overlay.root.Visible = not overlayHidden
 		hideButton.Text = if overlayHidden then "🖼 Show overlay" else "📽 Watch projector"
 	end, { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 10, 1, -10), Size = UDim2.fromOffset(190, 44), Parent = gui })
+
+	skipBar = Ui.new("Frame", { Name = "SkipBar", AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -10, 1, -10),
+		Size = UDim2.fromOffset(190, 100), BackgroundTransparency = 1, Parent = gui })
+	Ui.list(Enum.FillDirection.Vertical, 6).Parent = skipBar
+	skipEntryButton = Ui.button("⏩ Skip", T.Orange, function()
+		if not skipState.votedEntry then
+			skipState.votedEntry = true
+			ClientState.remote("RevealSkipVote"):FireServer("Entry")
+			refreshSkip(nil)
+		end
+	end, { Size = UDim2.new(1, 0, 0, 46), LayoutOrder = 1, MaxTextSize = 20, Parent = skipBar })
+	skipBookButton = Ui.button("⏭ Next book", T.Blue, function()
+		if not skipState.votedBook then
+			skipState.votedBook = true
+			ClientState.remote("RevealSkipVote"):FireServer("Book")
+			refreshSkip(nil)
+		end
+	end, { Size = UDim2.new(1, 0, 0, 46), LayoutOrder = 2, MaxTextSize = 20, Parent = skipBar })
+	ClientState.remote("RevealSkipStatus").OnClientEvent:Connect(function(status)
+		if type(status) == "table" then
+			refreshSkip(status)
+		end
+	end)
 
 	task.spawn(function()
 		local classroom = workspace:WaitForChild("Classroom", 30)

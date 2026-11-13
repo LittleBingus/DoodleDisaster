@@ -19,14 +19,16 @@ GameConfig.Timers = {
 	LobbyCountdown = 15,
 	StartingMatch = 4,
 	Drawing = 60,
-	Guessing = 30,
+	Guessing = 15,
 	-- Extra time after a deadline for in-flight submissions (client auto-submits at 0).
 	SubmissionGrace = 2,
 	CollectingSubmissions = 2,
-	RevealIntro = 3, -- title card for each sketchbook
-	RevealEntry = 4.5, -- each prompt / drawing / guess on screen
-	RevealBookOutro = 2,
-	AwardVoting = 30,
+	RevealIntro = 2, -- title card for each sketchbook
+	RevealEntry = 3, -- each prompt / drawing / guess on screen
+	RevealBookOutro = 1.5,
+	-- A majority skip vote can't cut a reveal step shorter than this, so it can still be read.
+	RevealMinRead = 1.2,
+	AwardVoting = 20,
 	Results = 12,
 	ReturningToLobby = 3,
 }
@@ -72,6 +74,7 @@ GameConfig.RateLimits = {
 	Submit = { Count = 4, Window = 5 },
 	Vote = { Count = 12, Window = 5 },
 	Reaction = { Count = 6, Window = 4 },
+	RevealSkip = { Count = 8, Window = 4 },
 	Lobby = { Count = 6, Window = 3 },
 	Packs = { Count = 5, Window = 3 },
 }

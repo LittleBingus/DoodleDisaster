@@ -34,6 +34,11 @@ if GameConfig.DevMode.Enabled and RunService:IsStudio() then
 		return game:GetService("StudioTestService"):GetTestArgs()
 	end)
 	GameState.devMode = not (ok and type(args) == "table" and args.devMode == false)
+	-- { privateServer = true } lets the host-controlled lobby be tested in Studio, where real
+	-- private servers don't exist. Also unreachable on live servers.
+	if ok and type(args) == "table" and args.privateServer == true then
+		GameState.isPrivate = true
+	end
 end
 
 local changed = Instance.new("BindableEvent")

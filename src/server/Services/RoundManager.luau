@@ -14,6 +14,7 @@ local TextRules = require(Shared.TextRules)
 
 local Logic = script.Parent.Parent.Logic
 local MatchCore = require(Logic.MatchCore)
+local SkipVote = require(Logic.SkipVote)
 
 local GameState = require(script.Parent.GameState)
 local Net = require(script.Parent.Net)
@@ -29,6 +30,7 @@ local core: any = nil
 local pendingGuess: { [number]: boolean } = {}
 local revealHistory: { any } = {} -- events of the current sketchbook, for late syncs
 local lastResults: any = nil
+local skipStatus: () -> any -- defined with the reveal code below
 
 local function participantsPresent(): { Player }
 	local out = {}
@@ -63,6 +65,7 @@ function RoundManager.syncPlayer(player: Player)
 		for _, ev in revealHistory do
 			Net.fire(player, "RevealEvent", ev)
 		end
+		Net.fire(player, "RevealSkipStatus", skipStatus())
 	elseif GameState.phase == Phases.AwardVoting then
 		VotingManager.sendBallot(player)
 	elseif GameState.phase == Phases.Results and lastResults then
@@ -93,43 +96,122 @@ local function waitForSubmissions(duration: number): boolean
 	return true
 end
 
-local function revealEntryTime(n: number): number
-	return math.max(3, GameConfig.Timers.RevealEntry - math.max(0, n - 4) * 0.3)
-end
-
 local function broadcastReveal(ev: any)
 	table.insert(revealHistory, ev)
 	Net.fireAll("RevealEvent", ev)
 end
 
+-- Fast-forward voting ----------------------------------------------------------------------
+local skipVotes: any = nil
+local entrySeq, bookSeq = 0, 0
+
+-- Participants who are still connected. Spectators and leavers never count.
+local function revealVoters(): { number }
+	local out = {}
+	if core then
+		for _, userId in core.userIds do
+			if not core.left[userId] and Players:GetPlayerByUserId(userId) then
+				table.insert(out, userId)
+			end
+		end
+	end
+	return out
+end
+
+function skipStatus()
+	local voters = revealVoters()
+	return {
+		entry = if skipVotes then skipVotes:count("Entry", voters) else 0,
+		book = if skipVotes then skipVotes:count("Book", voters) else 0,
+		needed = SkipVote.needed(#voters),
+		entrySeq = entrySeq,
+		bookSeq = bookSeq,
+	}
+end
+
+local function broadcastSkipStatus()
+	Net.fireAll("RevealSkipStatus", skipStatus())
+end
+
+-- Waits for `duration`, or less if a majority votes to skip (never less than RevealMinRead).
+-- Returns true when the rest of the current sketchbook should be skipped.
+local function revealWait(duration: number): boolean
+	entrySeq += 1
+	skipVotes:reset("Entry")
+	broadcastSkipStatus()
+	local started = os.clock()
+	local minRead = math.min(duration, GameConfig.Timers.RevealMinRead)
+	while true do
+		local elapsed = os.clock() - started
+		if elapsed >= duration then
+			return false
+		end
+		if elapsed >= minRead then
+			local voters = revealVoters()
+			if skipVotes:passed("Book", voters) then
+				return true
+			end
+			if skipVotes:passed("Entry", voters) then
+				return false
+			end
+		end
+		task.wait(0.1)
+	end
+end
+
 local function runReveal()
 	local books = core:getRevealBooks()
 	local n = #books
-	local entryTime = revealEntryTime(n)
+	local entryTime = GameConfig.Timers.RevealEntry
 	local perBook = GameConfig.Timers.RevealIntro + n * entryTime + GameConfig.Timers.RevealBookOutro
+	skipVotes = SkipVote.new()
 	GameState.setPhase(Phases.Reveal, perBook * n)
 	for b, book in books do
 		revealHistory = {}
+		bookSeq += 1
+		skipVotes:reset("Book")
+		-- Skips shorten the reveal, so re-publish the remaining time at the start of each book.
+		GameState.setTimer(perBook * (n - b + 1))
 		broadcastReveal({ type = "Book", bookIndex = b, bookCount = n, prompt = book.prompt, entryTime = entryTime })
-		task.wait(GameConfig.Timers.RevealIntro)
-		for i, entry in book.entries do
-			broadcastReveal({
-				type = "Entry",
-				bookIndex = b,
-				entryIndex = i,
-				entryCount = #book.entries,
-				kind = entry.kind,
-				content = entry.content,
-				auto = entry.auto,
-			})
-			task.wait(entryTime)
+		local skipBook = revealWait(GameConfig.Timers.RevealIntro)
+		if not skipBook then
+			for i, entry in book.entries do
+				broadcastReveal({
+					type = "Entry",
+					bookIndex = b,
+					entryIndex = i,
+					entryCount = #book.entries,
+					kind = entry.kind,
+					content = entry.content,
+					auto = entry.auto,
+				})
+				if revealWait(entryTime) then
+					break
+				end
+			end
 		end
+		-- The "started as / ended as" card always shows, even after a skip.
+		skipVotes:reset("Book")
 		broadcastReveal({ type = "BookEnd", bookIndex = b, bookCount = n, prompt = book.prompt,
 			final = book.entries[#book.entries] })
-		task.wait(GameConfig.Timers.RevealBookOutro)
+		revealWait(GameConfig.Timers.RevealBookOutro)
 	end
 	revealHistory = {}
+	skipVotes = nil
 	Net.fireAll("RevealEvent", { type = "Finished" })
+end
+
+local function onRevealSkipVote(player: Player, scope: any)
+	if GameState.phase ~= Phases.Reveal or not skipVotes or not core then
+		return
+	end
+	local uid = player.UserId
+	if not core:isParticipant(uid) or core.left[uid] then
+		return
+	end
+	if skipVotes:cast(scope, uid) then
+		broadcastSkipStatus()
+	end
 end
 
 local function abortMatch(reason: string)
@@ -142,6 +224,7 @@ local function finishMatch()
 	StationManager.unlockAll()
 	GameState.setPhase(Phases.ReturningToLobby, GameConfig.Timers.ReturningToLobby)
 	core = nil
+	skipVotes = nil
 	pendingGuess = {}
 	revealHistory = {}
 	GameState.participants = {}
@@ -298,10 +381,14 @@ function RoundManager.init()
 	local limit = GameConfig.RateLimits.Submit
 	Net.on("SubmitDrawing", limit, onSubmitDrawing)
 	Net.on("SubmitGuess", limit, onSubmitGuess)
+	Net.on("RevealSkipVote", GameConfig.RateLimits.RevealSkip, onRevealSkipVote)
 	Players.PlayerRemoving:Connect(function(player)
 		pendingGuess[player.UserId] = nil
 		if core and core:isParticipant(player.UserId) then
 			core:markLeft(player.UserId)
+			if GameState.phase == Phases.Reveal and skipVotes then
+				broadcastSkipStatus() -- the majority threshold just changed
+			end
 			Net.notifyAll(player.DisplayName .. " left. Their pages will be filled in by the class gremlin.", "info")
 		end
 	end)

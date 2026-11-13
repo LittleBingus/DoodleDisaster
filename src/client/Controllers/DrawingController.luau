@@ -178,59 +178,73 @@ local function submit()
 	ClientState.remote("SubmitDrawing"):FireServer(currentTask.step, buildDrawing())
 end
 
+-- Layout ----------------------------------------------------------------------------------
+-- Three arrangements, chosen from the space actually available, all in pixels so every
+-- button keeps a touch-friendly size (TOUCH px or more):
+--   side       wide and tall enough: tools in one column on the right
+--   wideShort  landscape phone: actions on the left, colours on the right, canvas between
+--   stacked    portrait / narrow: canvas on top, colours then actions underneath
+local TOUCH = 44
+local GAP = 6
+local PAD = 8
+
+function DrawingController.pickLayout(width: number, height: number): string
+	local headerH = if height < 480 then 48 else 70
+	local availH = height - headerH - PAD * 3
+	if width / math.max(height, 1) < 1.15 then
+		return "stacked"
+	elseif availH < 430 then
+		return "wideShort"
+	end
+	return "side"
+end
+
 local function build()
 	gui = Ui.screenGui("DrawingGui", 10)
 	gui.Enabled = false
 	local root = Ui.new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(255, 240, 200),
 		BackgroundTransparency = 0.15, Parent = gui })
 
-	local header = Ui.panel({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 8),
-		Size = UDim2.new(0.9, 0, 0, 70), BackgroundColor3 = T.Yellow, Parent = root })
+	local header = Ui.panel({ Name = "Header", Position = UDim2.fromOffset(PAD, PAD), Size = UDim2.new(1, -PAD * 2, 0, 70),
+		BackgroundColor3 = T.Yellow, Parent = root })
 	promptLabel = Ui.label("Draw!", { Size = UDim2.new(0.8, 0, 1, 0), Position = UDim2.fromScale(0.02, 0),
 		MaxTextSize = 34, TextXAlignment = Enum.TextXAlignment.Left, Parent = header })
 	timerLabel = Ui.label("60", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(0.98, 0),
 		Size = UDim2.new(0.16, 0, 1, 0), MaxTextSize = 40, Parent = header })
 
-	-- Canvas area (left/center) and toolbar (right on wide screens, bottom on narrow).
-	local area = Ui.new("Frame", { Name = "CanvasArea", Position = UDim2.new(0.03, 0, 0, 88),
-		Size = UDim2.new(0.74, 0, 1, -100), BackgroundTransparency = 1, Parent = root })
+	local area = Ui.new("Frame", { Name = "CanvasArea", BackgroundTransparency = 1, Parent = root })
 	canvas = DrawingRenderer.makeCanvas({ Parent = area })
 	Ui.stroke(4).Parent = canvas
 	local live = Instance.new("Folder")
 	live.Name = "Live"
 	live.Parent = canvas
 
-	local toolbar = Ui.panel({ Name = "Toolbar", Position = UDim2.new(0.79, 0, 0, 88), Size = UDim2.new(0.19, 0, 1, -100),
-		Parent = root })
-	Ui.padding(8).Parent = toolbar
-	local grid = Ui.new("Frame", { Size = UDim2.new(1, 0, 0.42, 0), BackgroundTransparency = 1, Parent = toolbar })
-	Ui.new("UIGridLayout", { CellSize = UDim2.new(0.3, 0, 0.2, 0), CellPadding = UDim2.new(0.04, 0, 0.04, 0),
+	-- Colours + brush sizes
+	local colorsBox = Ui.panel({ Name = "Colours", Parent = root })
+	Ui.padding(GAP).Parent = colorsBox
+	local grid = Ui.new("Frame", { Name = "Swatches", BackgroundTransparency = 1, Parent = colorsBox })
+	local gridLayout = Ui.new("UIGridLayout", { CellPadding = UDim2.fromOffset(GAP, GAP),
 		SortOrder = Enum.SortOrder.LayoutOrder, Parent = grid })
-	for i = 2, #DrawingTypes.Palette do
-		local b = Ui.new("TextButton", { Text = "", BackgroundColor3 = DrawingRenderer.color(i), LayoutOrder = i,
+	local function swatch(index: number, order: number)
+		local b = Ui.new("TextButton", { Text = "", BackgroundColor3 = DrawingRenderer.color(index), LayoutOrder = order,
 			AutoButtonColor = true, Parent = grid }, { Ui.corner(10), Ui.stroke(2) })
 		b.Activated:Connect(function()
-			colorIndex = i
+			colorIndex = index
 			erasing = false
 			refreshTools()
 		end)
-		swatches[i] = b
+		swatches[index] = b
 	end
-	-- the paper colour is also a usable "white" paint
-	local white = Ui.new("TextButton", { Text = "", BackgroundColor3 = DrawingRenderer.color(1), LayoutOrder = 99,
-		Parent = grid }, { Ui.corner(10), Ui.stroke(2) })
-	white.Activated:Connect(function()
-		colorIndex = 1
-		erasing = false
-		refreshTools()
-	end)
-	swatches[1] = white
+	for i = 2, #DrawingTypes.Palette do
+		swatch(i, i)
+	end
+	swatch(1, 99) -- the paper colour is also a usable "white" paint
 
-	local sizes = Ui.new("Frame", { Position = UDim2.fromScale(0, 0.44), Size = UDim2.new(1, 0, 0.1, 0),
-		BackgroundTransparency = 1, Parent = toolbar })
-	Ui.list(Enum.FillDirection.Horizontal, 4).Parent = sizes
-	for i = 1, #DrawingTypes.BrushSizes do
-		local b = Ui.new("TextButton", { Text = "", Size = UDim2.new(0.18, 0, 1, 0), BackgroundColor3 = T.Paper,
+	local sizes = Ui.new("Frame", { Name = "Sizes", BackgroundTransparency = 1, Parent = colorsBox })
+	Ui.list(Enum.FillDirection.Horizontal, GAP).Parent = sizes
+	local sizeCount = #DrawingTypes.BrushSizes
+	for i = 1, sizeCount do
+		local b = Ui.new("TextButton", { Text = "", Size = UDim2.new(1 / sizeCount, -GAP, 1, 0), BackgroundColor3 = T.Paper,
 			LayoutOrder = i, Parent = sizes }, { Ui.corner(8), Ui.stroke(2) })
 		local dot = Ui.new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
 			Size = UDim2.fromScale(0.2 + i * 0.13, 0.2 + i * 0.13), BackgroundColor3 = T.Ink, Parent = b },
@@ -242,37 +256,85 @@ local function build()
 		end)
 		sizeButtons[i] = b
 	end
+	pointsLabel = Ui.label("Ink: 100%", { Font = T.BodyFont, MaxTextSize = 13, Parent = colorsBox })
 
-	local tools = Ui.new("Frame", { Position = UDim2.fromScale(0, 0.56), Size = UDim2.new(1, 0, 0.44, 0),
-		BackgroundTransparency = 1, Parent = toolbar })
-	Ui.list(Enum.FillDirection.Vertical, 6).Parent = tools
-	local h = UDim2.new(1, 0, 0.18, 0)
+	-- Actions
+	local actionsBox = Ui.new("Frame", { Name = "Actions", BackgroundTransparency = 1, Parent = root })
+	local actionsLayout = Ui.list(Enum.FillDirection.Vertical, GAP)
+	actionsLayout.Parent = actionsBox
 	eraserButton = Ui.button("🧽 Eraser", T.Paper, function()
 		erasing = not erasing
 		refreshTools()
-	end, { Size = h, LayoutOrder = 1, Parent = tools })
-	Ui.button("↩️ Undo", T.Blue, undo, { Size = h, LayoutOrder = 2, Parent = tools })
-	Ui.button("🗑 Clear", T.Red, clearAll, { Size = h, LayoutOrder = 3, Parent = tools })
-	Ui.button("✅ Done!", T.Green, submit, { Size = UDim2.new(1, 0, 0.24, 0), LayoutOrder = 4, Parent = tools })
-	pointsLabel = Ui.label("Ink: 100%", { Size = UDim2.new(1, 0, 0.1, 0), LayoutOrder = 5, Font = T.BodyFont,
-		MaxTextSize = 14, Parent = tools })
+	end, { LayoutOrder = 1, Parent = actionsBox })
+	local undoButton = Ui.button("↩️ Undo", T.Blue, undo, { LayoutOrder = 2, Parent = actionsBox })
+	local clearButton = Ui.button("🗑 Clear", T.Red, clearAll, { LayoutOrder = 3, Parent = actionsBox })
+	local doneButton = Ui.button("✅ Done!", T.Green, submit, { LayoutOrder = 4, Parent = actionsBox })
+	local actionButtons = { { eraserButton, 1 }, { undoButton, 1 }, { clearButton, 1 }, { doneButton, 1.4 } }
+	local totalWeight = 4.4
 
-	-- Narrow screens: canvas on top, toolbar below.
-	local function layout()
-		local vs = workspace.CurrentCamera.ViewportSize
-		if vs.X / math.max(vs.Y, 1) < 1.15 then
-			area.Position = UDim2.new(0.03, 0, 0, 88)
-			area.Size = UDim2.new(0.94, 0, 0.55, -88)
-			toolbar.Position = UDim2.new(0.03, 0, 0.57, 0)
-			toolbar.Size = UDim2.new(0.94, 0, 0.42, -8)
-		else
-			area.Position = UDim2.new(0.03, 0, 0, 88)
-			area.Size = UDim2.new(0.74, 0, 1, -100)
-			toolbar.Position = UDim2.new(0.79, 0, 0, 88)
-			toolbar.Size = UDim2.new(0.19, 0, 1, -100)
+	local function place(obj: GuiObject, x: number, y: number, w: number, h: number)
+		obj.Position = UDim2.fromOffset(math.floor(x), math.floor(y))
+		obj.Size = UDim2.fromOffset(math.floor(math.max(w, 0)), math.floor(math.max(h, 0)))
+	end
+
+	-- Sizes the colour box contents for `cols` swatch columns; returns the height it needs.
+	local function arrangeColours(width: number, cols: number): number
+		local count = #DrawingTypes.Palette
+		local rows = math.ceil(count / cols)
+		local inner = width - GAP * 2
+		gridLayout.CellSize = UDim2.fromOffset(math.floor((inner - GAP * (cols - 1)) / cols), TOUCH)
+		local gridH = rows * TOUCH + (rows - 1) * GAP
+		place(grid, 0, 0, inner, gridH)
+		place(sizes, 0, gridH + GAP, inner, TOUCH)
+		place(pointsLabel, 0, gridH + GAP + TOUCH + 2, inner, 16)
+		return gridH + GAP + TOUCH + 2 + 16 + GAP * 2
+	end
+
+	local function arrangeActions(horizontal: boolean)
+		actionsLayout.FillDirection = if horizontal then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical
+		for _, entry in actionButtons do
+			local share = entry[2] / totalWeight
+			entry[1].Size = if horizontal then UDim2.new(share, -GAP, 1, 0) else UDim2.new(1, 0, share, -GAP)
 		end
 	end
-	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(layout)
+
+	local function layout()
+		local W, H = gui.AbsoluteSize.X, gui.AbsoluteSize.Y
+		if W <= 0 or H <= 0 then
+			return
+		end
+		local mode = DrawingController.pickLayout(W, H)
+		local headerH = if H < 480 then 48 else 70
+		header.Size = UDim2.new(1, -PAD * 2, 0, headerH)
+		local top = headerH + PAD * 2
+		local availH = H - top - PAD
+		root:SetAttribute("Layout", mode)
+		if mode == "side" then
+			local colW = math.clamp(W * 0.2, 256, 290)
+			local colX = W - colW - PAD
+			local coloursH = arrangeColours(colW, 4)
+			place(colorsBox, colX, top, colW, coloursH)
+			place(actionsBox, colX, top + coloursH + PAD, colW, availH - coloursH - PAD)
+			arrangeActions(false)
+			place(area, PAD, top, W - colW - PAD * 3, availH)
+		elseif mode == "wideShort" then
+			local leftW, rightW = 120, 256
+			place(actionsBox, PAD, top, leftW, availH)
+			arrangeActions(false)
+			local coloursH = arrangeColours(rightW, 4)
+			place(colorsBox, W - rightW - PAD, top, rightW, math.min(coloursH, availH))
+			place(area, leftW + PAD * 2, top, W - leftW - rightW - PAD * 4, availH)
+		else
+			local fullW = W - PAD * 2
+			local actionsH = 56
+			local coloursH = arrangeColours(fullW, 6)
+			place(actionsBox, PAD, H - PAD - actionsH, fullW, actionsH)
+			arrangeActions(true)
+			place(colorsBox, PAD, H - PAD - actionsH - PAD - coloursH, fullW, coloursH)
+			place(area, PAD, top, fullW, availH - actionsH - coloursH - PAD * 2)
+		end
+	end
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(layout)
 	layout()
 	refreshTools()
 end

@@ -4,7 +4,10 @@
 -- Safety rules:
 --   * If loading fails after retries, the player plays with a temporary profile that is
 --     NEVER saved, so existing data can't be overwritten with defaults.
---   * Saves use UpdateAsync and refuse to write if the stored version is newer.
+--   * Saves go through ProfileSaver: one write per player at a time, a profile stays dirty
+--     until a write containing its latest changes succeeds, and if the stored data is newer
+--     (another server saved in between) this session's changes are rebased onto it inside
+--     UpdateAsync instead of being dropped or overwriting it.
 --   * Clients can only *request* actions (unlock/toggle a pack); all values are computed here.
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -16,6 +19,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.GameConfig)
 local PromptPacks = require(Shared.PromptPacks)
 local Net = require(script.Parent.Net)
+local ProfileSaver = require(script.Parent.Parent.Logic.ProfileSaver)
 
 local PlayerDataManager = {}
 
@@ -31,6 +35,7 @@ export type Profile = {
 
 local SCHEMA_VERSION = 1
 local MAX_RETRIES = 3
+local LEAVE_SAVE_ROUNDS = 3 -- extra rounds of retries when a player leaves with unsaved data
 
 -- The only place a progression store is chosen: Studio sessions get their own store.
 local STORE_NAME = if RunService:IsStudio() then GameConfig.StudioDataStoreName else GameConfig.DataStoreName
@@ -48,9 +53,16 @@ do
 	end
 end
 
+local saver = ProfileSaver.new({
+	update = function(key, transform)
+		return (store :: DataStore):UpdateAsync(key, transform)
+	end,
+	wait = task.wait,
+	retries = MAX_RETRIES,
+})
+
 local profiles: { [Player]: Profile } = {}
 local loadFailed: { [Player]: boolean } = {}
-local dirty: { [Player]: boolean } = {}
 local loadedSignal = Instance.new("BindableEvent")
 PlayerDataManager.ProfileLoaded = loadedSignal.Event
 
@@ -137,30 +149,53 @@ function PlayerDataManager.get(player: Player): Profile?
 	return profiles[player]
 end
 
+local function markDirty(player: Player)
+	saver:markDirty(keyFor(player))
+end
+
+-- Saves the player's profile if it has unsaved changes. Returns true only when the store
+-- holds this session's latest changes afterwards.
 function PlayerDataManager.save(player: Player): boolean
 	local profile = profiles[player]
 	if not profile or loadFailed[player] or not store then
 		return false
 	end
-	local dataStore = store :: DataStore
-	profile.saveCount += 1
-	local snapshot = table.clone(profile)
-	snapshot.unlockedPacks = table.clone(profile.unlockedPacks)
-	snapshot.enabledPacks = table.clone(profile.enabledPacks)
-	local ok, err = withRetries(function()
-		return dataStore:UpdateAsync(keyFor(player), function(old)
-			if type(old) == "table" and type(old.saveCount) == "number" and old.saveCount >= snapshot.saveCount then
-				-- Stored data is newer (e.g. another server saved later). Don't clobber it.
-				return nil
-			end
-			return snapshot
-		end)
-	end)
-	if not ok then
-		warn(string.format("[PlayerData] save failed for %s: %s", player.Name, tostring(err)))
+	local before = profile.points
+	local ok, status = saver:save(keyFor(player), profile)
+	if ok then
+		if status == "merged" then
+			warn(string.format("[PlayerData] %s: newer stored data found; session changes were merged onto it", player.Name))
+		end
+		if profile.points ~= before or status == "merged" then
+			PlayerDataManager.push(player)
+		end
+		return true
+	end
+	if status ~= "in progress" then
+		warn(string.format("[PlayerData] save failed for %s (data kept, will retry): %s", player.Name, status))
+	end
+	return false
+end
+
+-- Blocks until the profile is saved or the retry budget is spent. Used on leave and shutdown.
+local function saveBeforeLeaving(player: Player): boolean
+	local key = keyFor(player)
+	for _ = 1, LEAVE_SAVE_ROUNDS do
+		while saver:isSaving(key) do
+			task.wait(0.1)
+		end
+		if not saver:isDirty(key) then
+			return true
+		end
+		if PlayerDataManager.save(player) then
+			return true
+		end
+	end
+	if saver:isDirty(key) then
+		warn(string.format("[PlayerData] GAVE UP saving %s after %d rounds; unsaved session progress was lost",
+			player.Name, LEAVE_SAVE_ROUNDS))
 		return false
 	end
-	dirty[player] = nil
 	return true
 end
 
@@ -186,7 +221,7 @@ function PlayerDataManager.applyGrant(player: Player, grant: { points: number, m
 	end
 	profile.awardsEarned += grant.awards
 	checkMilestones(player, profile)
-	dirty[player] = true
+	markDirty(player)
 	PlayerDataManager.push(player)
 	task.spawn(PlayerDataManager.save, player)
 end
@@ -216,7 +251,7 @@ function PlayerDataManager.unlockPack(player: Player, packId: any): (boolean, st
 	profile.points -= cost
 	profile.unlockedPacks[pack.Id] = true
 	profile.enabledPacks[pack.Id] = true
-	dirty[player] = true
+	markDirty(player)
 	PlayerDataManager.push(player)
 	task.spawn(PlayerDataManager.save, player)
 	return true, string.format("Unlocked %s!", pack.DisplayName)
@@ -231,7 +266,7 @@ function PlayerDataManager.setPackEnabled(player: Player, packId: any, enabled: 
 		return
 	end
 	profile.enabledPacks[packId] = enabled or nil
-	dirty[player] = true
+	markDirty(player)
 	PlayerDataManager.push(player)
 end
 
@@ -253,11 +288,16 @@ local function onPlayerAdded(player: Player)
 	local profile: Profile
 	if store then
 		local dataStore = store :: DataStore
+		-- A quick rejoin can arrive while this server is still writing the previous session.
+		while saver:isSaving(keyFor(player)) do
+			task.wait(0.1)
+		end
 		local ok, result = withRetries(function()
 			return dataStore:GetAsync(keyFor(player))
 		end)
 		if ok then
 			profile = reconcile(result)
+			saver:track(keyFor(player), profile)
 		else
 			warn(string.format("[PlayerData] load failed for %s: %s", player.Name, tostring(result)))
 			loadFailed[player] = true
@@ -268,6 +308,7 @@ local function onPlayerAdded(player: Player)
 		profile = defaultProfile()
 	end
 	if player.Parent ~= Players then
+		saver:untrack(keyFor(player))
 		return
 	end
 	profiles[player] = profile
@@ -285,20 +326,23 @@ function PlayerDataManager.init()
 		task.spawn(onPlayerAdded, p)
 	end
 	Players.PlayerRemoving:Connect(function(player)
-		if dirty[player] then
-			PlayerDataManager.save(player)
+		if profiles[player] and not loadFailed[player] then
+			saveBeforeLeaving(player)
 		end
 		profiles[player] = nil
 		loadFailed[player] = nil
-		dirty[player] = nil
+		-- Unless the same user already rejoined this server and is being tracked again.
+		if not Players:GetPlayerByUserId(player.UserId) then
+			saver:untrack(keyFor(player))
+		end
 	end)
 	game:BindToClose(function()
 		local threads = 0
 		for player in profiles do
-			if dirty[player] then
+			if saver:isDirty(keyFor(player)) or saver:isSaving(keyFor(player)) then
 				threads += 1
 				task.spawn(function()
-					PlayerDataManager.save(player)
+					saveBeforeLeaving(player)
 					threads -= 1
 				end)
 			end
@@ -312,7 +356,7 @@ function PlayerDataManager.init()
 		while true do
 			task.wait(GameConfig.AutosaveInterval)
 			for player in profiles do
-				if dirty[player] then
+				if saver:isDirty(keyFor(player)) then
 					task.spawn(PlayerDataManager.save, player)
 				end
 			end

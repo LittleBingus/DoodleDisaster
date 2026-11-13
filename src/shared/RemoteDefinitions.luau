@@ -19,6 +19,7 @@ RemoteDefinitions.Events = {
 	"Notify", -- (text, kind?) toast message
 	"ReactionShown", -- (userId, reactionIndex)
 	"VoteResult", -- (categoryId, candidateId, ok, reason)
+	"RevealSkipStatus", -- ({ entry, book, needed, entrySeq, bookSeq }) fast-forward vote tallies
 
 	-- client -> server
 	"RequestSync", -- () ask for the current snapshot + task + profile
@@ -26,6 +27,7 @@ RemoteDefinitions.Events = {
 	"SubmitGuess", -- (step, text)
 	"CastVote", -- (categoryId, candidateId)
 	"SendReaction", -- (reactionIndex)
+	"RevealSkipVote", -- (scope: "Entry" | "Book") vote to fast-forward the reveal
 	"SetReady", -- (bool)
 	"HostStart", -- ()
 	"SetDifficulty", -- (difficultyId) host only

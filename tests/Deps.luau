@@ -17,4 +17,6 @@ return {
 	PromptSelector = require(Logic.PromptSelector),
 	Rewards = require(Logic.Rewards),
 	RateLimiter = require(Logic.RateLimiter),
+	SkipVote = require(Logic.SkipVote),
+	ProfileSaver = require(Logic.ProfileSaver),
 }
