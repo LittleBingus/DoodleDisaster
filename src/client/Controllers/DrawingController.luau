@@ -318,7 +318,7 @@ local function connectInput()
 end
 
 function DrawingController.open(task: any)
-	local isNewTask = not currentTask or currentTask.step ~= task.step
+	local isNewTask = not currentTask or currentTask.step ~= task.step or currentTask.matchId ~= task.matchId
 	currentTask = task
 	if isNewTask then
 		submitted = false

@@ -1,10 +1,8 @@
 # Doodle Disaster: Implementation Status
 
-Last verified: 2026-11-12, on `feature/full-game-mvp` at commit `a8911f4` plus the
-`MovementController` fix described below.
+Last verified: 2026-11-12, on `feature/full-game-mvp`.
 
-Design reference: [GAME_DESIGN.md](GAME_DESIGN.md). That document predates the finalized
-design; it has not yet been reconciled against it.
+Design reference: [GAME_DESIGN.md](GAME_DESIGN.md), updated to the finalized specification.
 
 ## Development environment
 
@@ -75,7 +73,7 @@ Notes:
 
 ## PlayerDataManager assessment
 
-Ready for gameplay testing, with one caveat that should be settled first.
+Ready for gameplay testing; earning, saving and reloading are verified (see multiplayer results).
 
 What is sound:
 
@@ -89,13 +87,10 @@ What is sound:
 * Rewards are computed server-side and granted once per `matchId:userId`.
 * With Studio API access on, the load now succeeds: no `[PlayerData]` warnings in Output.
 
-Caveat:
-
-* **Studio and live servers share `DoodleDisaster_PlayerData_v1`**, which already contains
-  one record. A dev-mode solo match that is actually played to Results grants +20 points to
-  the tester's real record, and pack unlocks or toggles in Studio are saved too. Using a
-  separate store name when `RunService:IsStudio()` is true would keep test runs out of real
-  progression. Not changed yet; needs a decision.
+Store separation (done): Studio sessions use `DoodleDisaster_PlayerData_Dev_v1`, production
+uses `DoodleDisaster_PlayerData_v1`. `PlayerDataManager` is the only module that opens a
+progression store and picks the name with `RunService:IsStudio()`. No records were migrated,
+deleted or overwritten; the production store still holds the single record it had before.
 
 Smaller limitations, acceptable for testing:
 
@@ -103,7 +98,7 @@ Smaller limitations, acceptable for testing:
   by the guard, and `save` still reports success because `UpdateAsync` does not error.
 * A failed load is not retried later in the session.
 * No request-budget checks; fine at 8 players per server.
-* Not yet exercised end to end: a real grant, unlock and reload cycle (blocked on the caveat).
+* Not yet exercised: buying or toggling a pack, and milestone unlocks.
 
 ## Resolved issues
 
@@ -120,32 +115,74 @@ Smaller limitations, acceptable for testing:
    audio asset named "Pop Close Sound"). Nothing in the place or repo references it. The
    message is harmless and will keep appearing while the plugin is installed.
 
+## Multiplayer verification
+
+Run with `StudioTestService:ExecuteMultiplayerTestAsync` (one local server plus N clients, all
+driven through MCP). A test driver attached to each client submits distinct drawings and
+guesses, casts votes including deliberate self-votes and duplicates, and logs every server
+event. One client was driven by real mouse and keyboard input instead.
+
+| Check | Result |
+|---|---|
+| Three players join the classroom, locked Scriptable camera, free movement in lobby | Pass |
+| Countdown needs 3 ready players (dev mode off): cancels when one sits out, restarts when ready, never starts with 2 | Pass |
+| Each player gets a different prompt | Pass |
+| Rotation: every player contributes once to every sketchbook; guesser sees only the previous drawing, drawer only the previous guess | Pass (cross-checked from stroke colours and guess text per author) |
+| Phases end early when everyone has submitted; timeouts insert placeholders and the book continues from the last real text | Pass |
+| Shared reveal reaches all clients in order and completes | Pass |
+| Anonymous ballot carries no author data; self-vote and duplicate vote rejected by the server | Pass |
+| Results name the winners; ties share an award | Pass |
+| Rewards: +20 for completing, +5 per award, none for a mostly idle player | Pass |
+| Saved to the dev DataStore and reloaded after leaving and rejoining in a new session | Pass |
+| Everyone returns to the lobby and a second match starts on the same server | Pass |
+| Player leaves mid-match: announced, match continues, leaver gets no reward | Pass |
+| Drawing UI with real mouse input: strokes land under the pointer, colour, brush size, Undo, Done | Pass |
+| Guess UI with real keyboard input, Enter to submit | Pass |
+| Ballot UI: own entry not clickable, valid vote accepted, moves to next category | Pass |
+| Unit tests in a fresh server context | 65 passed, 0 failed |
+
+Bugs found and fixed during these runs:
+
+* The drawing and guess screens identified a task by step number only, so in a second
+  match the guess screen kept the previous drawing and stayed locked as submitted. Tasks
+  now carry `matchId`.
+* When a match produced nothing to vote on, clients were never told and the results screen
+  showed the previous match. The server now sends empty results.
+
+Testing notes:
+
+* Do not `require` server service modules from MCP `execute_luau`: it runs in a separate
+  module cache, so `Net` is executed again and creates a second `Remotes` folder.
+* For the same reason, unit tests run from edit mode can use stale cached modules. Run them
+  from a playtest or test-session server.
+* `{ devMode = false }` test args give the real three-player minimum in Studio.
+
 ## Open issues
 
-1. **Finalized design not yet received.** `GAME_DESIGN.md` still describes the game as
-   implemented; the feature table below cannot be measured against the final design.
-2. **Shared DataStore between Studio and live** (see the assessment above).
+1. A winner who left before results is shown as "A mysterious artist".
+2. On a narrow window (about 800 px wide) the drawing tool buttons are only about 22 px tall.
+3. Pack purchase, pack toggling and milestone unlocks have not been exercised.
+4. Classroom interactions, touch input, gamepad and private-server host flow have not been exercised.
+5. `rojo serve` and Studio must both be running; nothing checks this automatically.
 
 ## Feature status
 
-"Present" means the code exists and loads without errors. Only rows marked "Verified" have
-been exercised.
-
-| Area | Code | Status |
-|---|---|---|
-| Phase state machine, rotation, match logic, voting logic, prompt selection | `src/shared`, `src/server/Logic` | Verified by unit tests |
-| Drawing validation | `DrawingTypes` | Verified by unit tests |
-| Server boot, remotes | `GameManager`, `Net` | Verified in playtest (20 remotes created) |
-| Procedural classroom | `ClassroomBuilder` | Verified in playtest (builds; not visually reviewed) |
-| Lobby, dev-mode solo start | `LobbyManager` | Verified in playtest (solo match starts) |
-| Desk assignment and seat lock | `StationManager`, `MovementController` | Verified in playtest (server lock and client control lock) |
-| Drawing phase and UI | `RoundManager`, `DrawingController` | Present; phase reached and prompt shown, drawing not exercised |
-| Fixed camera | `CameraController` | Present; Scriptable camera active |
-| Guessing, text filtering | `GuessController`, `TextFilter` | Present, not exercised |
-| Reveal | `RevealController` | Present, not exercised |
-| Award voting, results | `VotingManager`, `VotingController` | Present, not exercised |
-| Rewards, persistence, pack unlocks | `RewardManager`, `PlayerDataManager` | Profile load verified; grant, unlock and save not exercised (see assessment) |
-| Classroom interactions | `ClassroomInteractionManager` | Present, not exercised |
-| Multiplayer (3 to 8), private-server host flow, late join | | Not exercised |
-| Touch and gamepad input | | Not exercised |
-| Custom prompts, monetisation | `CustomPromptService` | Disabled by design |
+| Area | Status |
+|---|---|
+| Lobby, countdown, minimum players, sit out | Verified in 3-player tests |
+| Station assignment, seat lock, movement restore | Verified |
+| Prompts, difficulty weights, no repeats | Verified by unit tests; prompts differ per player in play |
+| Drawing (server validation, UI with mouse) | Verified |
+| Guessing (limits, filtering call, UI with keyboard) | Verified; filter output cannot be meaningfully tested in Studio |
+| Sketchbook rotation and placeholders | Verified (unit tests and play) |
+| Shared reveal | Verified (events and overlay); projector screen not visually reviewed |
+| Anonymous voting and results | Verified |
+| Rewards and persistence | Verified against the dev DataStore |
+| Second match on the same server | Verified |
+| Mid-match disconnect | Verified |
+| Late joiner spectating | Not exercised (a test session cannot add a client mid-run) |
+| Pack unlock, toggle, milestones | Present, not exercised |
+| Classroom interactions | Present, not exercised |
+| Touch and gamepad input, private-server host flow | Present, not exercised |
+| 4, 6 and 8 players | See multiplayer verification; rotation is unit-tested for 1 to 8 |
+| Custom prompts, purchases | Disabled by design |

@@ -26,7 +26,15 @@ GameState.difficulty = GameConfig.DefaultDifficulty
 GameState.isPrivate = game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0
 GameState.hostUserId = nil :: number?
 GameState.lastAwardText = "No awards yet. Be the first legend!"
-GameState.devMode = GameConfig.DevMode.Enabled and RunService:IsStudio()
+GameState.devMode = false
+if GameConfig.DevMode.Enabled and RunService:IsStudio() then
+	-- Studio multiplayer tests can pass { devMode = false } as test args to exercise the
+	-- real player minimum. Unreachable on live servers because of the IsStudio check.
+	local ok, args = pcall(function()
+		return game:GetService("StudioTestService"):GetTestArgs()
+	end)
+	GameState.devMode = not (ok and type(args) == "table" and args.devMode == false)
+end
 
 local changed = Instance.new("BindableEvent")
 GameState.Changed = changed.Event -- fires (newPhase, oldPhase)

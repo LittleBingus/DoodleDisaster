@@ -52,6 +52,7 @@ function RoundManager.sendTask(player: Player)
 	if t then
 		t.endsAt = GameState.endsAt
 		t.station = GameState.stations[player.UserId]
+		t.matchId = GameState.matchId -- lets clients tell step N of this match from step N of the last one
 		Net.fire(player, "TaskAssigned", t)
 	end
 end

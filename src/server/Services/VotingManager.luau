@@ -19,6 +19,8 @@ local VotingManager = {}
 local session: any = nil
 local publicBallot: any = nil
 local authorOfCurrent: { [string]: number } = {}
+-- Display names of everyone seen this session, so a winner who left is still credited.
+local knownNames: { [number]: string } = {}
 
 local function ballotFor(player: Player)
 	local mine = {}
@@ -54,6 +56,8 @@ function VotingManager.run(core: any, voters: { Player })
 			return rng:NextNumber()
 		end)
 	if #ballot.categories == 0 then
+		-- Nothing to vote on: still tell clients, so the results screen doesn't show a previous match.
+		Net.fireAll("VotingClosed", {})
 		return {}, {}
 	end
 	local voterIds = {}
@@ -87,12 +91,11 @@ function VotingManager.run(core: any, voters: { Player })
 		for _, cid in r.candidateIds do
 			local c = ballot.candidates[cid]
 			local author = authorOf[cid]
-			local authorPlayer = if author then Players:GetPlayerByUserId(author) else nil
 			table.insert(winners, {
 				label = c.label,
 				kind = c.kind,
 				content = c.content,
-				authorName = if authorPlayer then authorPlayer.DisplayName else "A mysterious artist",
+				authorName = (author and knownNames[author]) or "A mysterious artist",
 			})
 		end
 		table.insert(display, { displayName = r.displayName, votes = r.votes, winners = winners })
@@ -105,6 +108,13 @@ function VotingManager.run(core: any, voters: { Player })
 end
 
 function VotingManager.init()
+	local function remember(player: Player)
+		knownNames[player.UserId] = player.DisplayName
+	end
+	Players.PlayerAdded:Connect(remember)
+	for _, p in Players:GetPlayers() do
+		remember(p)
+	end
 	Net.on("CastVote", GameConfig.RateLimits.Vote, function(player, categoryId, candidateId)
 		if not session or GameState.phase ~= Phases.AwardVoting then
 			Net.fire(player, "VoteResult", categoryId, candidateId, false, "Voting is closed.")

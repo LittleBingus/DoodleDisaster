@@ -332,8 +332,8 @@ local function buildInteractives()
 	sparkle.SparkleColor = rgb(255, 230, 120)
 	sparkle.Parent = pencil
 	local bb = Instance.new("BillboardGui")
-	bb.Size = UDim2.fromOffset(220, 60)
-	bb.StudsOffset = Vector3.new(0, 6, 0)
+	bb.Size = UDim2.fromScale(14, 4) -- studs, so the label scales with the room instead of the screen
+	bb.StudsOffset = Vector3.new(-3, 6, 0)
 	bb.MaxDistance = 400
 	bb.Parent = pencil
 	local winner = Instance.new("TextLabel")
@@ -341,6 +341,7 @@ local function buildInteractives()
 	winner.BackgroundTransparency = 1
 	winner.Font = Enum.Font.FredokaOne
 	winner.TextScaled = true
+	winner.TextWrapped = true
 	winner.TextColor3 = rgb(255, 215, 60)
 	winner.TextStrokeTransparency = 0
 	winner.Text = "Golden Pencil"

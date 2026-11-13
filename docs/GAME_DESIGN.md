@@ -1,11 +1,28 @@
 # Doodle Disaster: Game Design (MVP)
 
-Doodle Disaster is a 3–8 player drawing-and-guessing party game set in a chaotic 2.5D
-classroom. Every player starts a sketchbook from a funny prompt; sketchbooks rotate,
-alternating drawing and guessing, until everyone has touched every book. Then the whole
+Doodle Disaster is a multiplayer Roblox party game inspired by Telestrations and Gartic
+Phone, set in a colourful, chaotic, meme-inspired art classroom. Players interpret funny
+scenarios, idioms and metaphors through alternating drawing and guessing. The goal is funny
+misunderstandings, not artistic perfection.
+
+Every player starts a sketchbook from a unique prompt; sketchbooks rotate, alternating
+drawing and guessing, until everyone has contributed once to every book. Then the whole
 class watches a synchronized reveal and votes on anonymous awards.
 
-This document describes the game **as implemented** in this repository.
+This document is the finalized MVP specification, reconciled with the code in this
+repository. Where the code makes a choice the specification leaves open, that choice is
+described here. What has and has not been verified is tracked in
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+
+## MVP scope
+
+In scope: 3 to 8 players (5 to 6 is the sweet spot), public and private servers, the
+classroom built from Roblox primitives, the full draw/guess/reveal/vote/reward loop,
+three difficulty modes, four prompt packs, saved progression, and four lightweight
+classroom interactions.
+
+Not in the MVP: paid custom prompts (Developer Products), cosmetics, gameplay-altering
+Chaos Events, custom Blender meshes, and player counts above 8. No live purchases exist.
 
 ## Core loop
 
@@ -48,13 +65,19 @@ countdown regardless of latency.
   host presses **Start class** (≥3 ready players) and chooses difficulty.
 * **Studio dev mode:** `GameConfig.DevMode` lowers the minimum to 1 *only* when
   `RunService:IsStudio()` is true, so it can't affect live servers. The HUD shows "DEV".
+  Studio multiplayer tests can pass `{ devMode = false }` as test args to run with the real
+  three-player minimum.
 
 ## Prompts and difficulty
 
 Prompts (`src/shared/PromptPacks.luau`) have `Id, Phrase, Category, Difficulty, Pack,
 Enabled`. Categories map to difficulty: Scenario → Easy, Idiom → Medium, Metaphor → Hard.
-The free **Starter Chaos** pack already contains all three (20 / 16 / 12 prompts), so idioms
-and metaphors are never locked behind progression.
+The free **Starter Chaos** pack already contains all three (32 scenarios, 26 idioms, 20
+metaphors), so idioms and metaphors are never locked behind progression. The library holds
+141 prompts across the four packs.
+
+Difficulty and pack ownership are separate: difficulty decides the easy/medium/hard mix,
+packs decide which prompts are in the pool.
 
 | Difficulty | Easy | Medium | Hard |
 |---|---|---|---|
@@ -147,10 +170,12 @@ with no votes has no winner. Names are revealed only after voting closes.
 * Each award won: **+5** (only for legitimate completers).
 * `RewardManager` grants once per `matchId:userId`; clients never send reward values.
 * `PlayerDataManager` stores `points, matchesCompleted, awardsEarned, unlockedPacks,
-  enabledPacks` in DataStore `DoodleDisaster_PlayerData_v1`. Loads retry 3×; if loading
+  enabledPacks` in DataStore `DoodleDisaster_PlayerData_v1` (production). Loads retry 3×; if loading
   fails the session uses a temporary profile that is **never saved**, so existing data
   can't be overwritten with defaults. Saves use `UpdateAsync` with a `saveCount` guard,
   autosave every 120 s, on leave, and on `BindToClose`.
+* Studio sessions use a separate store, `DoodleDisaster_PlayerData_Dev_v1`, chosen on the
+  server with `RunService:IsStudio()`, so playtests never read or write live progression.
 
 ## Classroom and camera
 

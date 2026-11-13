@@ -91,7 +91,7 @@ local function build()
 end
 
 function GuessController.open(t: any)
-	local isNew = not currentTask or currentTask.step ~= t.step
+	local isNew = not currentTask or currentTask.step ~= t.step or currentTask.matchId ~= t.matchId
 	currentTask = t
 	if isNew then
 		submitted = false
