@@ -21,7 +21,11 @@ return function(t)
 	end)
 
 	t.test("studio and production progression stores are distinct", function()
-		t.eq(GameConfig.DataStoreName, "DoodleDisaster_PlayerData_v1")
+		t.eq(GameConfig.ProductionDataStoreName, "DoodleDisaster_PlayerData_v1")
+		t.eq(GameConfig.AlphaDataStoreName, "DoodleDisaster_PlayerData_Alpha_v1")
+		t.eq(GameConfig.DataStoreName, GameConfig.AlphaDataStoreName, "published servers use the alpha store during friends-only testing")
+		t.truthy(GameConfig.DataStoreName ~= GameConfig.StudioDataStoreName)
+		t.truthy(GameConfig.DataStoreName ~= GameConfig.ProductionDataStoreName)
 		t.eq(GameConfig.StudioDataStoreName, "DoodleDisaster_PlayerData_Dev_v1")
 	end)
 

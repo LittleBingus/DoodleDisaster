@@ -50,3 +50,8 @@ Verified vs not: see `IMPLEMENTATION_STATUS.md`, "Session 3". Short version: pac
 ## Rules in force
 
 No push, merge to `main` or publish without the owner's approval. The owner may commit from VS Code, so check `git status` and `git log` before editing. Lua scripts are edited only in local files (Rojo owns the script folders). Test with `StudioTestService:ExecuteMultiplayerTestAsync(n, args)`; do not `require` server services from MCP `execute_luau` (it duplicates the `Remotes` folder); test clients have no `loadstring`, so attach drivers by `require`ing a ModuleScript. Use only the dev DataStore.
+
+## Friends-only alpha configuration (2026-11-14)
+
+* Published servers use `DoodleDisaster_PlayerData_Alpha_v1` (`GameConfig.DataStoreName`); Studio uses `..._Dev_v1`; `DoodleDisaster_PlayerData_v1` (production) is untouched and unused. For a real launch, set `GameConfig.DataStoreName = GameConfig.ProductionDataStoreName`.
+* Experience visibility must stay `PRIVATE`. Voice chat, VR and server size 8 are set in Creator Hub / Game Settings by the owner (Open Cloud write scopes are not granted to MCP, and `Players.MaxPlayers` is read-only from scripts).

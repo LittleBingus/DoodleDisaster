@@ -98,7 +98,12 @@ GameConfig.CustomPrompts = {
 
 -- Player progression stores. The server picks one in PlayerDataManager using
 -- RunService:IsStudio(), so Studio playtests never read or write live progression.
-GameConfig.DataStoreName = "DoodleDisaster_PlayerData_v1"
+-- Published servers use DataStoreName. It points at the ALPHA store while the game is in
+-- friends-only testing so alpha play can never touch ProductionDataStoreName. Switching to
+-- ProductionDataStoreName is the one-line change for a real launch.
+GameConfig.ProductionDataStoreName = "DoodleDisaster_PlayerData_v1"
+GameConfig.AlphaDataStoreName = "DoodleDisaster_PlayerData_Alpha_v1"
+GameConfig.DataStoreName = GameConfig.AlphaDataStoreName
 GameConfig.StudioDataStoreName = "DoodleDisaster_PlayerData_Dev_v1"
 GameConfig.AutosaveInterval = 120
 
