@@ -13,6 +13,11 @@
 --   * A profile stays dirty until a write that contained its latest revision succeeds.
 --   * One write per key at a time; a save requested while one is in flight is run right after.
 --   * Keys that were never tracked (failed loads) are never written.
+--   * Every write is stamped with a writeId. If a write reaches the store but the call
+--     reports an error, the retry recognises its own stamp and does not apply the session's
+--     changes a second time (no double rewards).
+--   * Pack on/off choices are rebased as changes too, so a pack another session disabled is
+--     not switched back on unless this session touched it.
 
 local ProfileSaver = {}
 ProfileSaver.__index = ProfileSaver
@@ -23,6 +28,7 @@ export type Options = {
 	update: (key: string, transform: (old: any) -> any) -> any, -- atomic; may error
 	wait: ((seconds: number) -> ())?,
 	retries: number?,
+	sessionId: string?, -- unique per server; generated if omitted
 }
 
 local function copyProfile(p: any): any
@@ -55,6 +61,23 @@ function ProfileSaver.resolve(old: any, base: any, current: any): (any, boolean)
 				end
 			end
 		end
+		-- Enabled packs: start from theirs, then apply only what this session changed.
+		local enabled = if type(old.enabledPacks) == "table" then table.clone(old.enabledPacks) else {}
+		local baseEnabled = base.enabledPacks or {}
+		local seen = {}
+		for packId in current.enabledPacks or {} do
+			seen[packId] = true
+		end
+		for packId in baseEnabled do
+			seen[packId] = true
+		end
+		for packId in seen do
+			local now = (current.enabledPacks or {})[packId] == true
+			if now ~= (baseEnabled[packId] == true) then
+				enabled[packId] = now or nil
+			end
+		end
+		out.enabledPacks = enabled
 	end
 	out.saveCount = math.max(oldCount, baseCount) + 1
 	return out, rebased
@@ -65,6 +88,8 @@ function ProfileSaver.new(opts: Options)
 	self.update = opts.update
 	self.wait = opts.wait or function() end
 	self.retries = opts.retries or 3
+	self.sessionId = opts.sessionId or tostring(os.clock()) .. "-" .. tostring(math.random(1, 1e9))
+	self.writeCounter = 0
 	self.states = {} :: { [string]: any }
 	return self
 end
@@ -134,10 +159,21 @@ function ProfileSaver.save(self, key: string, profile: any): (boolean, string)
 		local written: any = nil
 		local lastErr: any = nil
 		ok = false
+		self.writeCounter += 1
+		local writeId = self.sessionId .. ":" .. self.writeCounter
 		for attempt = 1, self.retries do
 			local success, result = pcall(self.update, key, function(old)
-				local data, wasRebased = ProfileSaver.resolve(old, st.base, snapshot)
+				local base = st.base
+				local pending = st.pending
+				if pending and type(old) == "table" and old.writeId == pending.id then
+					-- An earlier attempt of ours did land even though the call failed: build
+					-- on it instead of adding this session's changes again.
+					base = pending.data
+				end
+				local data, wasRebased = ProfileSaver.resolve(old, base, snapshot)
+				data.writeId = writeId
 				rebased = wasRebased
+				st.pending = { id = writeId, data = data }
 				return data
 			end)
 			if success and type(result) == "table" then
@@ -161,8 +197,25 @@ function ProfileSaver.save(self, key: string, profile: any): (boolean, string)
 					profile.unlockedPacks[packId] = true
 				end
 			end
+			-- Pack toggles: adopt the stored value unless this session changed that pack while
+			-- the write was in flight (otherwise the next rebase would read our stale local
+			-- value as a fresh change and undo another session's toggle).
+			local packIds = {}
+			for packId in written.enabledPacks or {} do
+				packIds[packId] = true
+			end
+			for packId in snapshot.enabledPacks or {} do
+				packIds[packId] = true
+			end
+			for packId in packIds do
+				local unchangedInFlight = (profile.enabledPacks[packId] == true) == ((snapshot.enabledPacks or {})[packId] == true)
+				if unchangedInFlight then
+					profile.enabledPacks[packId] = if (written.enabledPacks or {})[packId] == true then true else nil
+				end
+			end
 			profile.saveCount = written.saveCount
 			st.base = copyProfile(written)
+			st.pending = nil
 			st.savedRevision = revisionAtSnapshot
 			status = if rebased then "merged" else "saved"
 		else

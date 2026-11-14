@@ -1,6 +1,8 @@
 # Doodle Disaster: Implementation Status
 
-Last verified: 2026-11-12, on `feature/full-game-mvp`.
+Last reviewed: 2026-11-13, on `feature/full-game-mvp`. HEAD `842c593` is on GitHub; `ProfileSaver` changes are uncommitted (see
+[DEVELOPMENT_HANDOFF.md](DEVELOPMENT_HANDOFF.md)). Sections below dated earlier than the "Session 3" section may describe
+older behaviour (30 s guessing, 30 s voting, no reveal skip, `PlayerDataManager.save` as it was).
 
 Design reference: [GAME_DESIGN.md](GAME_DESIGN.md), updated to the finalized specification.
 
@@ -94,11 +96,10 @@ deleted or overwritten; the production store still holds the single record it ha
 
 Smaller limitations, acceptable for testing:
 
-* No session locking. If two servers hold the same player at once, the later save is dropped
-  by the guard, and `save` still reports success because `UpdateAsync` does not error.
+* (Superseded by `ProfileSaver`, see Session 3.) Earlier versions dropped a stale save while
+  reporting success.
 * A failed load is not retried later in the session.
 * No request-budget checks; fine at 8 players per server.
-* Not yet exercised: buying or toggling a pack, and milestone unlocks.
 
 ## Resolved issues
 
@@ -162,15 +163,54 @@ Testing notes:
   from a playtest or test-session server.
 * `{ devMode = false }` test args give the real three-player minimum in Studio.
 
+## Session 3: pacing, reveal skip, responsive UI, safer saves
+
+Timers now: Drawing 60 s, Guessing 15 s, Voting 20 s, reveal intro 2 s / entry 3 s / outro 1.5 s
+(`GameConfig.Timers`, minimum read time for skips `RevealMinRead` 1.2 s).
+
+| Area | Status |
+|---|---|
+| Timers as above, early advance when all submit (phases end about 3 s after the last submission) | Verified in 3, 4 and private 4-player runs |
+| Expiry of the 15 s guess timer with no submission | **Not verified** with the new value (placeholder logic verified earlier at 30 s) |
+| Reveal skip: one vote does not advance, duplicate votes ignored, spectator votes ignored, strict majority advances, threshold shrinks when a player leaves (needed 3 -> 2), skip status reaches all clients | Verified (4 players). Whole-book skip verified with 3 players |
+| Reveal skip buttons on screen | Built; never looked at in a screenshot |
+| Drawing toolbar: side / landscape-phone / portrait layouts | Verified by measurement at 1365x768, 750x381 and 401x778 (all buttons 44 px+, no overlap, no off-screen). At 705x338 (Galaxy A06) 8 buttons are 41-42 px, not 44 |
+| Touch drawing and Undo | Verified only through Studio touch emulation, not on a device |
+| Private-server host flow (via test arg `{ privateServer = true }`): non-host start and difficulty rejected, host start gives a 5 s countdown, difficulty change broadcast | Verified |
+| Sit-out player: no task, no reward, spectator banner, ballot with `canVote=false`, joins next match when ready again | Verified |
+| Packs: buy (60 deducted from 110), repeat, insufficient points, free pack and unknown id all rejected with a message; toggle works; non-owned and free-pack toggles ignored; enabled pack appears in the match pool list | Verified. Prompts actually drawn from a non-free pack were not inspected |
+| Milestone unlock at 8 matches | Seen once (notice fired at matches=8) |
+| Unlocks and points persist across test sessions | Verified |
+| Departed award winner credited by name; vote for a leaver's entries counted | Verified |
+| Three consecutive matches on one server | Verified |
+| Concurrent external write (+1000 points and a pack added to a stored record mid-session) | Merged, nothing lost (see note) |
+| Unit tests | 84 passed, 0 failed (includes uncommitted ProfileSaver tests) |
+
+`ProfileSaver` (`src/server/Logic/ProfileSaver.luau`): one write per player at a time; profile stays
+dirty until a write containing its latest revision succeeds; a newer stored record is rebased onto
+inside `UpdateAsync` (deltas for points, matches, awards; unlock union; pack toggles only where this
+session changed them); each write carries a `writeId` so a write that landed but reported an error is
+not applied twice on retry. Failed or untracked (failed-load) profiles are never written.
+Verified by unit tests with a fake store, and live only for the external-write case above. Real
+DataStore outages, throttling and a failing save on leave or shutdown have **not** been exercised live.
+
+## Cleanup needed (temporary test data)
+
+* `ReplicatedStorage.__McpTestDriver` in the Studio edit place (test driver; delete before publishing).
+* Studio test session left running when this review began: one server and six idle clients (6-player run, never driven).
+* `DoodleDisaster_PlayerData_Dev_v1` holds test records `player_-1` to `player_-6` (Player3 was seeded to 7 matches). Dev store only.
+* `DoodleDisaster_DevTest_v1` holds the key `xsession_e43234e8-bdc4-4746` (value nil after a refused delete). Dev store only.
+* Production store `DoodleDisaster_PlayerData_v1` still has its single original key and was never written.
+
 ## Open issues
 
-1. During the reveal on a narrow window the camera pushes the suspicious button off-screen, so its prompt is hidden until the reveal ends.
-2. On a narrow window (about 800 px wide) the drawing tool buttons are only about 22 px tall.
-3. Pack purchase, pack toggling and milestone unlocks have not been exercised.
-4. Touch input, gamepad, the private-server host flow and late-joiner spectating have not been exercised.
-5. 6 players was not run separately (3, 4 and 8 were); rotation is unit-tested for 1 to 8.
-6. `rojo serve` and Studio must both be running; nothing checks this automatically.
-7. A 4-client test session once started with only 3 clients (the fourth closed while loading); relaunching worked.
+1. Not done: 6-player match, 8-player run with the new timers and skip, late-joiner spectating, real-device touch, gamepad.
+2. Suspicious button is pushed off-screen by the reveal camera on narrow windows (not fixed).
+3. Galaxy A06-size landscape (705x338): some toolbar buttons are 41-42 px.
+4. Visual polish pass (furniture, palette, lighting, projector, sounds, ambient animation) not started.
+5. `GAME_DESIGN.md` still lists Guessing 30 s, Voting 30 s and has no reveal-skip or Easter-egg section.
+6. A 4-client test session once started with 3 clients; relaunching worked.
+7. `rojo serve` and Studio must both be running; nothing checks this.
 
 ## Feature status
 
@@ -187,9 +227,9 @@ Testing notes:
 | Rewards and persistence | Verified against the dev DataStore |
 | Second match on the same server | Verified |
 | Mid-match disconnect | Verified |
-| Late joiner spectating | Not exercised (a test session cannot add a client mid-run) |
-| Pack unlock, toggle, milestones | Present, not exercised |
+| Late joiner spectating | Not exercised (sit-out spectating verified instead) |
+| Pack unlock, toggle, milestones | Verified (see Session 3) |
 | Classroom interactions | Verified |
-| Touch and gamepad input, private-server host flow | Present, not exercised |
+| Touch (emulated), private-server host flow | Verified in Studio; real devices and gamepad untested |
 | 3, 4 and 8 players | Verified in play; 6 not run; rotation is unit-tested for 1 to 8 |
 | Custom prompts, purchases | Disabled by design |

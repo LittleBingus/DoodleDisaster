@@ -212,6 +212,142 @@ return function(t)
 		t.eq(store.data.k.points, 500, "existing progress untouched")
 	end)
 
+	t.test("a write that lands but reports failure is not applied twice on retry", function()
+		local store = fakeStore()
+		store.data.k = profile(100, 5)
+		local saver = ProfileSaver.new({ update = store.update, retries = 3 })
+		local p = profile(100, 5)
+		saver:track("k", p)
+		p.points += 20 -- match reward
+		p.matchesCompleted += 1
+		saver:markDirty("k")
+		-- first call: the transform runs and the data is stored, then the call errors (timeout)
+		local realUpdate = store.update
+		local first = true
+		saver.update = function(key, transform)
+			if first then
+				first = false
+				realUpdate(key, transform)
+				error("simulated timeout after commit")
+			end
+			return realUpdate(key, transform)
+		end
+		local ok = saver:save("k", p)
+		t.truthy(ok)
+		t.eq(store.data.k.points, 120, "reward counted exactly once")
+		t.eq(store.data.k.matchesCompleted, 1)
+		t.eq(p.points, 120)
+		t.falsy(saver:isDirty("k"))
+	end)
+
+	t.test("a landed-but-failed write is recognised even by a later save call", function()
+		local store = fakeStore()
+		store.data.k = profile(100, 5)
+		local saver = ProfileSaver.new({ update = store.update, retries = 1 })
+		local p = profile(100, 5)
+		saver:track("k", p)
+		p.points += 20
+		saver:markDirty("k")
+		local realUpdate = store.update
+		saver.update = function(key, transform)
+			realUpdate(key, transform)
+			error("simulated timeout after commit")
+		end
+		t.falsy(saver:save("k", p), "reported as failed")
+		t.truthy(saver:isDirty("k"))
+		t.eq(store.data.k.points, 120, "but it did land")
+		saver.update = realUpdate
+		p.points += 5 -- more progress before the next save
+		saver:markDirty("k")
+		t.truthy(saver:save("k", p))
+		t.eq(store.data.k.points, 125, "20 once, plus the new 5")
+		t.eq(p.points, 125)
+	end)
+
+	t.test("two sessions granting rewards both keep theirs, each exactly once", function()
+		local store = fakeStore()
+		store.data.k = profile(0, 1)
+		local a = ProfileSaver.new({ update = store.update, sessionId = "A" })
+		local b = ProfileSaver.new({ update = store.update, sessionId = "B" })
+		local pa, pb = profile(0, 1), profile(0, 1)
+		a:track("k", pa)
+		b:track("k", pb)
+		pa.points += 20
+		a:markDirty("k")
+		pb.points += 25
+		b:markDirty("k")
+		t.truthy(a:save("k", pa))
+		t.truthy(b:save("k", pb))
+		t.eq(store.data.k.points, 45)
+		-- saving again from either side changes nothing
+		a:markDirty("k")
+		t.truthy(a:save("k", pa))
+		t.eq(store.data.k.points, 45, "A re-saving after B must not re-add A's 20")
+		t.eq(pa.points, 45)
+		b:markDirty("k")
+		t.truthy(b:save("k", pb))
+		t.eq(store.data.k.points, 45)
+	end)
+
+	t.test("rebasing does not switch a pack back on that another session disabled", function()
+		local base = profile(0, 3)
+		base.unlockedPacks.Brainrot = true
+		base.unlockedPacks.EverydayDisasters = true
+		base.enabledPacks = { Brainrot = true, EverydayDisasters = true }
+		local theirs = deepCopy(base)
+		theirs.saveCount = 4
+		theirs.enabledPacks.Brainrot = nil -- other session turned Brainrot off
+		local ours = deepCopy(base)
+		ours.enabledPacks.EverydayDisasters = nil -- we turned Everyday Disasters off
+		local out, rebased = ProfileSaver.resolve(theirs, base, ours)
+		t.truthy(rebased)
+		t.eq(out.enabledPacks.Brainrot, nil, "their change is kept")
+		t.eq(out.enabledPacks.EverydayDisasters, nil, "our change is applied")
+		t.eq(out.unlockedPacks.Brainrot, true, "ownership is never lost")
+	end)
+
+	t.test("after a merged save the live profile matches the store, so the next save cannot undo the other session's pack toggle", function()
+		local store = fakeStore()
+		local start = profile(100, 3)
+		start.unlockedPacks.Brainrot = true
+		start.enabledPacks = { Brainrot = true }
+		store.data.k = deepCopy(start)
+		local saver = ProfileSaver.new({ update = store.update, sessionId = "A" })
+		local p = deepCopy(start)
+		saver:track("k", p)
+		store.data.k.enabledPacks = {}
+		store.data.k.saveCount = 4
+		p.points += 20
+		saver:markDirty("k")
+		t.eq(select(2, saver:save("k", p)), "merged")
+		t.eq(store.data.k.enabledPacks.Brainrot, nil)
+		t.eq(p.enabledPacks.Brainrot, nil, "live profile adopted the stored toggle")
+		store.data.k.saveCount += 1
+		store.data.k.points += 1
+		p.points += 5
+		saver:markDirty("k")
+		t.truthy(saver:save("k", p))
+		t.eq(store.data.k.enabledPacks.Brainrot, nil, "Brainrot is still off")
+		t.eq(store.data.k.points, 126)
+	end)
+
+	t.test("a toggle made while a write is in flight is kept", function()
+		local store = fakeStore()
+		local saver = ProfileSaver.new({ update = store.update })
+		local p = profile(0, 0)
+		p.unlockedPacks.Brainrot = true
+		saver:track("k", p)
+		p.points = 5
+		saver:markDirty("k")
+		store.beforeTransform = function()
+			p.enabledPacks.Brainrot = true
+			saver:markDirty("k")
+		end
+		t.truthy(saver:save("k", p))
+		t.eq(p.enabledPacks.Brainrot, true)
+		t.eq(store.data.k.enabledPacks.Brainrot, true, "follow-up write stored it")
+	end)
+
 	t.test("first ever save for a new player", function()
 		local data, rebased = ProfileSaver.resolve(nil, profile(), profile(20))
 		t.falsy(rebased)
