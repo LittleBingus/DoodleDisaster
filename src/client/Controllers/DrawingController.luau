@@ -189,7 +189,7 @@ local GAP = 6
 local PAD = 8
 
 function DrawingController.pickLayout(width: number, height: number): string
-	local headerH = if height < 480 then 48 else 70
+	local headerH = if height < 300 then 40 elseif height < 480 then 48 else 70
 	local availH = height - headerH - PAD * 3
 	if width / math.max(height, 1) < 1.15 then
 		return "stacked"
@@ -269,8 +269,8 @@ local function build()
 	local undoButton = Ui.button("↩️ Undo", T.Blue, undo, { LayoutOrder = 2, Parent = actionsBox })
 	local clearButton = Ui.button("🗑 Clear", T.Red, clearAll, { LayoutOrder = 3, Parent = actionsBox })
 	local doneButton = Ui.button("✅ Done!", T.Green, submit, { LayoutOrder = 4, Parent = actionsBox })
-	local actionButtons = { { eraserButton, 1 }, { undoButton, 1 }, { clearButton, 1 }, { doneButton, 1.4 } }
-	local totalWeight = 4.4
+	local actionButtons = { { eraserButton, 1 }, { undoButton, 1 }, { clearButton, 1 }, { doneButton, 1.2 } }
+	local totalWeight = 4.2
 
 	local function place(obj: GuiObject, x: number, y: number, w: number, h: number)
 		obj.Position = UDim2.fromOffset(math.floor(x), math.floor(y))
@@ -304,7 +304,7 @@ local function build()
 			return
 		end
 		local mode = DrawingController.pickLayout(W, H)
-		local headerH = if H < 480 then 48 else 70
+		local headerH = if H < 300 then 40 elseif H < 480 then 48 else 70
 		header.Size = UDim2.new(1, -PAD * 2, 0, headerH)
 		local top = headerH + PAD * 2
 		local availH = H - top - PAD
@@ -318,7 +318,7 @@ local function build()
 			arrangeActions(false)
 			place(area, PAD, top, W - colW - PAD * 3, availH)
 		elseif mode == "wideShort" then
-			local leftW, rightW = 120, 256
+			local leftW, rightW = 120, 280
 			place(actionsBox, PAD, top, leftW, availH)
 			arrangeActions(false)
 			local coloursH = arrangeColours(rightW, 4)

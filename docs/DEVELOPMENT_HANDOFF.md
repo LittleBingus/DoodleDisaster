@@ -4,10 +4,8 @@ Written 2026-11-13 from the repository and Studio state, not from memory of earl
 
 ## Repository state
 
-* Branch `feature/full-game-mvp`; `main` untouched at `e351c1f`.
-* HEAD `842c593` ("Faster pacing, majority reveal skip, responsive drawing UI, safer saves") is **already on `origin/feature/full-game-mvp`** (0 ahead, 0 behind; the owner pushed it).
-* **Uncommitted, not pushed:** `src/server/Logic/ProfileSaver.luau` and `tests/specs/ProfileSaver.spec.luau` (write-id double-apply protection, pack-toggle rebasing, 4 new tests). They are synced to Studio and the 84-test suite passes with them. Review and commit them first.
-* This handoff, the `IMPLEMENTATION_STATUS.md` update and the stale `GAME_DESIGN.md` are also uncommitted or pending.
+* Branch `feature/full-game-mvp`. `main` untouched at `e351c1f`. `842c593` and earlier are on GitHub; later local commits (ProfileSaver fixes, docs, camera/toolbar fixes) are **not pushed**. Run `git status` and `git log origin/feature/full-game-mvp..HEAD` to see exactly what is unpushed.
+* The owner sometimes commits from VS Code: check before editing.
 
 ## What exists (50 Luau files, ~7k lines)
 
@@ -27,28 +25,25 @@ Verified vs not: see `IMPLEMENTATION_STATUS.md`, "Session 3". Short version: pac
 
 ## Known bugs / gaps
 
-1. Suspicious button off-screen during reveal on narrow windows.
-2. Toolbar buttons 41-42 px at 705x338.
-3. 15 s guess expiry unverified; reveal skip buttons never viewed.
-4. `GAME_DESIGN.md` out of date (see below).
+1. Late joiner, real-device touch, gamepad, live DataStore outage, 8-player run with new timers: untested (manual).
+2. Reveal skip buttons never viewed on screen.
+3. Visual polish not started.
+4. ProfileSaver residual: a landed-but-failed write plus a cross-server write in the same moments can double-apply one delta (rare).
 
 ## Cleanup before any publish
 
-* Delete `ReplicatedStorage.__McpTestDriver` (Studio edit place, not in Git).
-* End the leftover 6-client test session (call `StudioTestService:EndTest(...)` from the test server, or close the extra Studio windows).
-* Dev DataStore test records (`DoodleDisaster_PlayerData_Dev_v1`, `DoodleDisaster_DevTest_v1`) are harmless but can be cleared from a playtest server.
-* Production store was never written.
+* Studio place is clean (verified). Dev DataStore test records are harmless (`DoodleDisaster_PlayerData_Dev_v1`, `DoodleDisaster_DevTest_v1`).
+* Production store never written.
+* Test drivers are temporary ModuleScripts created in `ReplicatedStorage` by MCP; recreate and delete per run.
 
 ## Resume here
 
-1. `git status`; review and commit the two ProfileSaver files locally.
-2. Update `docs/GAME_DESIGN.md`: Guessing 15 s, Voting 20 s, reveal timings, reveal-skip section, test args, and the future idea below.
-3. Finish testing: 6-player and 8-player matches with the new timers and skip; guess-timer expiry; late joiner (needs a manual second Studio client); simulate a failing `UpdateAsync` to watch the leave-save retry.
-4. Look at the reveal screen with skip buttons at phone and desktop sizes.
-5. Fix the off-screen suspicious button; nudge the toolbar at 705x338.
-6. Only then begin the visual polish pass (list in the owner's brief: furniture, palette, lighting, projector, sounds, ambient animation, reveal camera). Blender needs go in a doc, not procedural approximations.
+1. Look at the reveal screen with skip buttons at phone and desktop sizes.
+2. Manual tests the owner can do: late join (second Studio client), real phone, gamepad.
+3. Optional: 8-player run with the 15 s / 20 s timers.
+4. Then the visual polish pass (furniture, palette, lighting, projector, sounds, ambient animation, reveal camera framing). Blender needs go in a doc.
 
-## Future idea (record in GAME_DESIGN.md, do not build yet)
+## Future idea (recorded in GAME_DESIGN.md, do not build yet)
 
 "The Doodle Disaster Incident": a harmless, absurd Easter egg at 0.00001% per match. Server-authoritative roll; reduced-scares accessibility option; no strobing or intense flashes; moderate volume; must not interrupt active drawing; no gameplay advantage or exclusive reward.
 

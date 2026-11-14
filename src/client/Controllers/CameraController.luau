@@ -14,8 +14,12 @@ local CameraController = {}
 local camera = workspace.CurrentCamera
 local LOOK_AT = Vector3.new(0, 2, -4)
 local BASE_POS = Vector3.new(0, 74, 70)
-local REVEAL_POS = Vector3.new(0, 52, 46)
-local REVEAL_LOOK = Vector3.new(0, 6, -16)
+-- The reveal view eases in only slightly: a tighter shot hid the suspicious button and the
+-- trash can at every window size.
+local REVEAL_POS = Vector3.new(0, 66, 64)
+local REVEAL_LOOK = Vector3.new(0, 5, -8)
+-- Horizontal half-extent (tan(fov/2) * aspect) of the reference 16:10 landscape view.
+local REFERENCE_HALF_WIDTH = 0.746
 
 local blend = Instance.new("NumberValue") -- 0 = classroom, 1 = reveal focus
 blend.Value = 0
@@ -32,11 +36,21 @@ local function fovForViewport(): number
 	return 78
 end
 
+-- Narrow viewports see less of the room sideways, so the camera backs away to keep the whole
+-- classroom (and its interactive props) in frame.
+function CameraController.distanceScale(fovDegrees: number, aspect: number): number
+	local halfWidth = math.tan(math.rad(fovDegrees / 2)) * aspect
+	return math.clamp(REFERENCE_HALF_WIDTH / math.max(halfWidth, 0.01), 1, 2.4)
+end
+
 local function targetCFrame(): CFrame
 	local t = blend.Value
 	local pos = BASE_POS:Lerp(REVEAL_POS, t)
 	local look = LOOK_AT:Lerp(REVEAL_LOOK, t)
-	return CFrame.lookAt(pos, look)
+	local size = camera.ViewportSize
+	local aspect = if size.Y > 0 then size.X / size.Y else 16 / 9
+	local scale = CameraController.distanceScale(fovForViewport(), aspect)
+	return CFrame.lookAt(look + (pos - look) * scale, look)
 end
 
 local function setFocus(reveal: boolean)

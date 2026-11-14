@@ -42,10 +42,10 @@ Phases live in `src/shared/Phases.luau` with an explicit transition table. The s
 | Countdown | 15 s (public) / 5 s after host start | cancels if ready players drop below the minimum |
 | StartingMatch | 4 s | desks assigned, players seated and frozen |
 | Drawing | 60 s | draw the prompt or the previous guess |
-| Guessing | 30 s | guess the previous drawing |
+| Guessing | 15 s | guess the previous drawing |
 | CollectingSubmissions | 2 s | placeholders inserted, books pass to the next desk |
-| Reveal | server-paced | each book: prompt → entries → "started as / ended as" |
-| AwardVoting | 30 s (ends early if everyone voted) | anonymous ballot |
+| Reveal | server-paced: 2 s intro, 3 s per entry, 1.5 s outro per book (skippable by majority vote) | each book: prompt → entries → "started as / ended as" |
+| AwardVoting | 20 s (ends early if everyone voted) | anonymous ballot |
 | Results | 12 s | winners and names revealed, Doodle Points granted |
 | ReturningToLobby | 3 s | everyone released, next match can start |
 
@@ -66,7 +66,8 @@ countdown regardless of latency.
 * **Studio dev mode:** `GameConfig.DevMode` lowers the minimum to 1 *only* when
   `RunService:IsStudio()` is true, so it can't affect live servers. The HUD shows "DEV".
   Studio multiplayer tests can pass `{ devMode = false }` as test args to run with the real
-  three-player minimum.
+  three-player minimum, and `{ privateServer = true }` to exercise the host lobby. Both only take
+  effect when `RunService:IsStudio()` is true and cannot change a published server.
 
 ## Prompts and difficulty
 
@@ -152,6 +153,18 @@ de-anonymise voting). Movement is restored during the reveal, players can react 
 preset emoji reactions (shown above their heads and floating over the reveal), and can hide
 the overlay to watch the projector. Late joiners are re-synced to the current book.
 
+**Pacing.** Timings come from `GameConfig.Timers` (`RevealIntro` 2 s, `RevealEntry` 3 s,
+`RevealBookOutro` 1.5 s). The reveal timer is re-published at the start of each sketchbook so
+skips never leave the clock wrong.
+
+**Majority skip.** Players can vote to skip the current entry ("Skip") or the rest of the current
+sketchbook ("Next book"). The server (`SkipVote`, `RoundManager`) counts only participants who are
+still connected; a skip passes when a strict majority has voted, so one player can never move
+everyone (except in a one-person Studio test). Duplicate votes are ignored, spectators' votes are
+ignored, and when a player leaves the threshold and tally are recomputed. A skip never cuts a step
+shorter than `RevealMinRead` (1.2 s), and the "started as / ended as" card of each book always
+shows. Tallies are broadcast to everyone (`RevealSkipStatus`) so buttons show the same counts.
+
 ## Anonymous awards
 
 Categories: Funniest Drawing, Biggest Disaster, Most Confusing Guess, Unexpected
@@ -217,6 +230,17 @@ prompts, votes, points) is never accepted from clients.
   `ProcessReceipt` is assigned and **no product ID exists**. Its header lists the steps to
   enable it.
 * **Chaos Events:** drawing input transforms (see Drawing).
+
+## Future idea: "The Doodle Disaster Incident" (not implemented)
+
+An extremely rare, absurd Easter egg (proposed chance 0.00001% per match). It is a harmless joke,
+not a horror sequence. It must not be built until requested. Requirements for a future version:
+
+* The roll happens on the server only.
+* A reduced-scares accessibility option that players can enable.
+* No strobing or intense flashes, and moderate sound volume.
+* It never interrupts an active drawing or guessing step.
+* No gameplay advantage and no exclusive reward.
 
 ## Code map
 
