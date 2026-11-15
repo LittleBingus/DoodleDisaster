@@ -212,6 +212,27 @@ record before our retry, our retry can add this session's delta on top of data t
 It needs a store timeout plus a cross-server write in the same few seconds; the common single-server
 timeout case is handled and tested.
 
+## Session 5: alpha feedback (2026-11-14/15)
+
+Implemented: democratic mode vote, projector announcement, 25 s guessing timer, censored-guess
+fallback, Hide / Report for drawings, rejoin for participants, lobby/reaction-bar overlap fix.
+
+| Area | Result |
+|---|---|
+| Unit tests (fresh playtest server) | 110 passed, 0 failed (24 new: ModeVote, GuessFallback, ReportLog, MatchCore rejoin / fallback / drawing ids, config) |
+| 3-player session, 3 consecutive matches | Pass. No server errors or warnings |
+| Mode vote | Pass: 2 Meltdown vs 1 Casual locked Brain Meltdown; an invalid mode id was ignored; a changed vote counted once; nobody voting gave Mixed Madness; a 2-2 Casual/Meltdown tie (5-player session) was broken at random and flagged as a tie; a sitting-out player's vote was refused with a message |
+| Announcement | Pass: projector and seated panel show the mode and subtitle during StartingMatch, sound loaded and playing, tint applied; seen in a screenshot |
+| Censored guess (Studio `simulateFilter` test arg) | Pass: fully censored guess replaced by a phrase from the approved list, sender notified, next player drew the phrase, reveal showed the fallback caption, phrase absent from the ballot. A partly censored guess was kept as filtered |
+| Report | Pass: accepted once, duplicate refused, own drawing and blank page refused; the artist's other drawings then arrived without strokes for the reporter only (reveal, ballot, results); two reports saved to the dev report store with match, book, entry, author and strokes |
+| Hide | Pass with a real mouse click on the results screen; every card showing that drawing switched to the placeholder |
+| Mid-match disconnect (3 players, one kicked) | Pass: match continued with 2, completed, rewards paid once, lobby then required a third player |
+| 5-player session with host start | Pass (4 playing, 1 sitting out) |
+| Lobby layout | Fixed: the reaction bar no longer covers the lobby panel on narrow windows (checked at 798 px wide) |
+
+Not verifiable in Studio: the real filter's output on a published server, a participant actually
+rejoining (covered by unit tests only), late joiners, real phones.
+
 ## Cleanup status
 
 * Studio place: clean.
@@ -219,6 +240,7 @@ timeout case is handled and tested.
 
 ## Open issues
 
+0. Public release: see "Public-beta blockers" in `DEVELOPMENT_HANDOFF.md`.
 1. Not tested: late joiner (a test session cannot add a client mid-run), real-device touch, gamepad, a real DataStore outage, 8-player run with the new timers.
 2. Reveal skip buttons never viewed in a screenshot.
 3. Visual polish not started (furniture, palette, lighting, projector, sounds, ambient animation).

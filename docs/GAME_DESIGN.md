@@ -40,9 +40,9 @@ Phases live in `src/shared/Phases.luau` with an explicit transition table. The s
 |---|---|---|
 | WaitingForPlayers | until enough ready players | free roam, interactions on |
 | Countdown | 15 s (public) / 5 s after host start | cancels if ready players drop below the minimum |
-| StartingMatch | 4 s | desks assigned, players seated and frozen |
+| StartingMatch | 4 s | desks assigned, players seated and frozen; the voted mode is announced on the projector |
 | Drawing | 60 s | draw the prompt or the previous guess |
-| Guessing | 15 s | guess the previous drawing |
+| Guessing | 25 s (testing baseline; compare 20/25/30/35 via `GameConfig.Timers.Guessing`) | guess the previous drawing |
 | CollectingSubmissions | 2 s | placeholders inserted, books pass to the next desk |
 | Reveal | server-paced: 2 s intro, 3 s per entry, 1.5 s outro per book (skippable by majority vote) | each book: prompt → entries → "started as / ended as" |
 | AwardVoting | 20 s (ends early if everyone voted) | anonymous ballot |
@@ -58,11 +58,24 @@ countdown regardless of latency.
 * 3–8 players per match (`GameConfig.MinPlayers` / `MaxPlayers`). Extra players and late
   joiners spectate until the next match.
 * **Public servers:** a 15 s countdown starts automatically when at least 3 ready players
-  are present. Players can toggle *Ready / Sitting out*. The longest-present player is the
-  "class captain" and can change difficulty.
+  are present. Players can toggle *Ready / Sitting out*.
 * **Private servers** (`game.PrivateServerId ~= ""` and an owner): the owner (or the
   longest-present player if the owner is absent) is host. Nothing starts automatically; the
-  host presses **Start class** (≥3 ready players) and chooses difficulty.
+  host presses **Start class** (≥3 ready players). The host cannot choose the mode.
+* **Mode vote** (`ModeVote`, `VoteDifficulty` remote): in the lobby every ready player has one
+  vote for Casual Chaos, Mixed Madness or Brain Meltdown and may change it until the countdown
+  ends. The server tallies only the votes of the players who start the match (sitting-out
+  players and spectators are rejected and never counted). Highest count wins; Mixed Madness
+  wins any tie it is part of; other ties are broken at random; no votes = Mixed Madness. The
+  result is locked for the match and votes are cleared for the next one.
+* **Announcement:** during StartingMatch the projector and the seated players' panel show
+  "THE CLASS HAS CHOSEN: <MODE>!" with the mode's subtitle (`GameConfig.Difficulties[].Subtitle`),
+  a short built-in sound and one slow room tint (no flashing). It adds no time to the match.
+* **Leaving and returning:** a match in progress continues with two connected players (it ends
+  early below two); new matches still need three. A leaver's pages are filled with placeholders
+  and nobody waits for them. If they rejoin the same server during the match they get their
+  desk and the current page back (`MatchCore.markReturned`); pages already filled in stay.
+  Rewards are still paid once per match per player and need at least half of the pages done.
 * **Studio dev mode:** `GameConfig.DevMode` lowers the minimum to 1 *only* when
   `RunService:IsStudio()` is true, so it can't affect live servers. The HUD shows "DEV".
   Studio multiplayer tests can pass `{ devMode = false }` as test args to run with the real
@@ -140,9 +153,32 @@ with injected dependencies, so it is unit-tested without Roblox networking.
 
 Guesses are trimmed, whitespace-collapsed, UTF-8 checked and capped at 60 characters
 (`TextRules`), rate-limited, then filtered with `TextService:FilterStringAsync` +
-`GetNonChatStringForBroadcastAsync` before anyone else can see them. If filtering fails, the
-original text is discarded and a safe placeholder is stored instead. Timeouts insert a
+`GetNonChatStringForBroadcastAsync` before anyone else can see them. Timeouts insert a
 placeholder.
+
+**Censored guesses** (`GuessFallback`): if the filter fails, or its output is entirely or mostly
+`#` (fewer than three word characters left, or more `#` than word characters), the guess is
+replaced by a random developer-written phrase from `GameConfig.Guess.FallbackPhrases`. The
+phrase becomes the next player's drawing prompt, is shown in the reveal with its own caption,
+is never an award candidate, and the player is told it was replaced. The typed text is dropped:
+never stored, logged, inferred or used to pick the phrase. Partly censored guesses with real
+words left are kept as filtered.
+
+## Drawing moderation
+
+Drawings cannot go through Roblox's text filter, so players get two controls on every drawing
+they are shown (guess screen, reveal, voting, results):
+
+* **Hide** (client): replaces that drawing with a placeholder everywhere it appears again for
+  that viewer, including the projector. Can be undone.
+* **Report** (two taps; `ReportDrawing` remote, `ModerationManager`, `ReportLog`): the server
+  resolves the drawing's opaque id to its match, book, entry and author, rejects own drawings,
+  blank pages, duplicates and spam (3 per 10 s, 4 per match, 12 per server session), and saves
+  the report with the strokes to a DataStore (`DoodleDisaster_Reports_Alpha_v1`, Studio:
+  `..._Dev_v1`) for the owner to review. The reporter is then no longer sent that artist's
+  drawings for the rest of the server session (reveal, ballots, results, guess tasks).
+* Reports never punish anyone automatically. Roblox's own Report menu is untouched.
+* Drawing ids are random per match and reveal nothing about the author.
 
 ## Shared reveal
 
@@ -231,6 +267,23 @@ prompts, votes, points) is never accepted from clients.
   enable it.
 * **Chaos Events:** drawing input transforms (see Drawing).
 
+## Postponed features (not implemented)
+
+**Substitute Doodler.** A bot that takes over abandoned drawing and guessing pages using
+predefined safe drawings and guesses through the normal sketchbook system. Four personalities:
+Terrible Artist (hilariously bad), Average Student (simple but readable), Secret Picasso
+(occasionally impressive), Chaos Gremlin (absurd and unrelated). Needs a library of
+hand-made stroke data per prompt category. Until then leavers' pages are placeholders.
+
+**Repeated quitting.** Requirements only, nothing is tracked or enforced yet: no automatic
+punishment, never deduct Doodle Points, never penalise ordinary connection failures, consider
+a warning and then a short cooldown only after repeated deliberate abandonment (for example
+several early leaves within one day), and keep the first public beta welcoming.
+
+**Moderation follow-ups.** A review tool for saved reports, hiding a drawing for everyone when
+most of the room reports it, persistent per-player block lists, and server-side handling of
+repeat offenders.
+
 ## Future idea: "The Doodle Disaster Incident" (not implemented)
 
 An extremely rare, absurd Easter egg (proposed chance 0.00001% per match). It is a harmless joke,
@@ -247,15 +300,16 @@ not a horror sequence. It must not be built until requested. Requirements for a 
 ```
 src/shared        GameConfig, PromptPacks, Phases, Rotation, DrawingTypes, DrawingRenderer,
                   TextRules, RemoteDefinitions
-src/server/Logic  MatchCore, VotingCore, PromptSelector, Rewards, RateLimiter   (pure, tested)
+src/server/Logic  MatchCore, VotingCore, PromptSelector, Rewards, RateLimiter, SkipVote,
+                  ProfileSaver, ModeVote, GuessFallback, ReportLog              (pure, tested)
 src/server/Services
                   GameManager (boot + loop), GameState, Net, LobbyManager, RoundManager,
                   VotingManager, RewardManager, PlayerDataManager, PromptManager,
                   StationManager, ClassroomBuilder, ClassroomInteractionManager,
-                  TextFilter, CustomPromptService
+                  TextFilter, ModerationManager, CustomPromptService
 src/client        Main + Controllers: ClientState, Ui, CameraController, MovementController,
                   UIController, DrawingController, GuessController, RevealController,
-                  VotingController
+                  VotingController, DrawingGuard
 tests             TestRunner + specs (Rotation, MatchCore, DrawingTypes, PromptSelector,
                   VotingCore, Rules)
 ```

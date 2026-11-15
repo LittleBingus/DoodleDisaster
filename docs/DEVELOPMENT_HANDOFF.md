@@ -1,75 +1,62 @@
 # Doodle Disaster: Development Handoff
 
-Written 2026-11-13 from the repository and Studio state, not from memory of earlier chats.
+Updated 2026-11-15 from the repository and Studio state.
 
-## Status at end of session (2026-11-14): ready for a private friends-only alpha, not yet published
+## Status: private alpha played; alpha-feedback build implemented, not yet republished
 
-* Branch `feature/full-game-mvp`, latest commit `66bcfe7` ("Use a separate alpha DataStore for published servers"). It is on GitHub (`origin/feature/full-game-mvp`), local tree clean. `main` untouched.
-* Place saved to Roblox (Team Create version 26). **Not published.** Experience visibility is `PRIVATE`.
-* The owner sometimes commits from VS Code: run `git status` and `git log` before editing.
+* Branch `feature/full-game-mvp`. The owner committed and pushed the feedback work as `0edc7c5`; later local commits may follow (check `git log origin/feature/full-game-mvp..HEAD`). `main` untouched.
+* The experience is published and `PRIVATE` (8 players per server, voice and VR off). **The published build predates this session**: mode voting, the 25 s guess timer, the guess fallback, Hide / Report and rejoin are only in Studio and Git until the owner republishes.
+* The owner sometimes commits from VS Code and restarts Studio: run `git status`, `git log` and re-list Studio instances before editing.
 
-## What exists (50 Luau files, ~7k lines)
+## What changed this session (details in `IMPLEMENTATION_STATUS.md`, Session 5)
 
-Complete core loop for 3 to 8 players: lobby, ready/sit-out, 15 s public countdown or host start (private), station seating, alternating draw/guess with sketchbook rotation, shared reveal with majority skip vote, anonymous awards, rewards (+20 / +5 per award), saved progression (points, matches, awards, packs), three difficulties, four prompt packs (141 prompts), classroom interactions, locked camera.
+1. **Mode vote** replaces the host's difficulty button (`ModeVote`, `LobbyManager`, `VoteDifficulty`).
+2. **Announcement** on the projector during StartingMatch, with sound and tint (`RevealController`).
+3. **Guess timer 25 s** (`GameConfig.Timers.Guessing`).
+4. **Censored-guess fallback** (`GuessFallback`, `GameConfig.Guess.FallbackPhrases`, `RoundManager`).
+5. **Hide / Report drawings** (`DrawingGuard` client, `ModerationManager` + `ReportLog` server, report DataStore).
+6. **Rejoin**: a participant returning to the same server resumes at the current page (`MatchCore.markReturned`, `StationManager.restore`).
+7. Lobby panel no longer overlaps the reaction bar on narrow screens.
 
-Structure: `src/shared` (config, phases, rotation, drawing format, prompts, remotes), `src/server/Logic` (pure, unit-tested: MatchCore, VotingCore, PromptSelector, Rewards, RateLimiter, SkipVote, ProfileSaver), `src/server/Services` (RoundManager, GameState, LobbyManager, PlayerDataManager, ...), `src/client/Controllers`, `tests/`.
+Tests: 110 unit tests pass; 3-player (3 matches, including a mid-match kick) and 5-player sessions pass.
 
-## Latest session (all in `842c593` except ProfileSaver follow-up)
+## Public-beta blockers
 
-* Timers: guess 15 s, vote 20 s, reveal 2 / 3 / 1.5 s; all in `GameConfig.Timers`.
-* Reveal skip: `RevealSkipVote` remote, strict majority of connected participants, 1.2 s minimum read time, status broadcast `RevealSkipStatus`, two buttons in `RevealController`.
-* Drawing UI: pixel-based three-layout toolbar in `DrawingController.pickLayout`.
-* DataStore: `ProfileSaver` integrated into `PlayerDataManager` (retry-on-leave, dirty tracking, atomic rebase).
-* Studio-only test args: `{ devMode = false }` (real 3-player minimum) and `{ privateServer = true }`. Both are gated by `RunService:IsStudio()`.
+1. **Republish and re-test on a live server.** None of the new features has run outside Studio. In particular the real text filter (expect a replacement phrase for a fully censored guess), a real rejoin, a late joiner and a real phone.
+2. **Roblox questionnaire: free-form user creation.** Drawings that other players see must be declared in the Content Maturity questionnaire (Creator Hub > experience > Audience). Roblox's Creator docs currently say such experiences are only available to players aged 16 and over (the 2024 announcement said 13). Confirm the current wording before going public; this limits the audience and is not something code can change.
+3. **Report review is manual.** Reports are saved to `DoodleDisaster_Reports_Alpha_v1` but there is no tool or routine for reading them, and nothing acts on repeat offenders. Before a broad launch someone has to look at them (Studio command bar, or Open Cloud DataStore API). The store contains user ids, so it falls under Roblox's data-deletion requests.
+4. **DataStore choice.** Published servers still write to the alpha store. Decide whether beta players keep alpha progress (stay on it) or start on `ProductionDataStoreName` (one line in `GameConfig`).
 
-Verified vs not: see `IMPLEMENTATION_STATUS.md`, "Session 3". Short version: pacing, skip voting, host flow, sit-out, pack economy, persistence, disconnects, three consecutive matches and responsive layouts (by measurement) are verified; real-device touch, gamepad, late join, 6- and 8-player runs with new timers, live DataStore failure and all visual polish are not.
+Known limits that do not block a limited beta: Hide is per drawing and per session; a reported artist is only hidden from the reporter; a drawing is seen once before it can be hidden; rejoining only works if Roblox puts the player back on the same server; leavers' pages are placeholders (no Substitute Doodler); no quitting penalties; ProfileSaver's rare cross-server double-apply; visual polish not started; gamepad untested.
 
-## Known bugs / gaps
+## Next session: in order
 
-1. Late joiner, real-device touch, gamepad, live DataStore outage, 8-player run with new timers: untested (manual).
-2. Reveal skip buttons never viewed on screen.
-3. Visual polish not started.
-4. ProfileSaver residual: a landed-but-failed write plus a cross-server write in the same moments can double-apply one delta (rare).
+1. Sync check (Git, Rojo, Studio scripts, experience settings).
+2. With the owner's approval, publish privately and run the live checklist below with 3 or more friends.
+3. Fill in the questionnaire item for free-form user creation and read the resulting age restriction.
+4. Decide the DataStore for the beta.
+5. Only then consider a limited public beta.
 
-## Alpha preparation
+## Live checklist (private server, 3+ players, one on a phone)
 
-**DataStores (no records modified).** Published servers use `DoodleDisaster_PlayerData_Alpha_v1` (`GameConfig.DataStoreName` = `AlphaDataStoreName`). Studio uses `..._Dev_v1`. The production store `DoodleDisaster_PlayerData_v1` (holds one record, `player_77159458`, the owner's) is untouched and unused. For a real launch, set `GameConfig.DataStoreName = GameConfig.ProductionDataStoreName`.
-
-**Verified (final run, d2bf525 + alpha store change).** Git, Rojo and Studio in sync (50 scripts, matching checksums); 86 unit tests pass in a fresh test server; Output clean except the Rojo plugin's own asset warning; no temporary MCP objects in the place; no monetization code is active (no `ProcessReceipt`, no product ID); reveal skip buttons seen on screen and a real click registers a vote without advancing alone; 3, 4, 6 and 8 player matches, timeouts, disconnects, host controls, sit-out, packs and persistence verified earlier (see `IMPLEMENTATION_STATUS.md`).
-
-**Experience settings read from Roblox (read-only):** visibility `PRIVATE`; age rating 13+; desktop, mobile and tablet on; console off; voice chat **on**; VR **on**; place server size **50**. MCP has no Open Cloud write scopes and `Players.MaxPlayers` is read-only from scripts, so these must be changed by the owner.
-
-**Needs real-world testing (cannot be done in Studio):** Roblox text filtering of guesses on a published server (profanity becomes `####`, normal text passes); late joiner; touch on a real phone; gamepad; a failing DataStore save in a live server. Drawings are not filtered (normal for drawing games, a moderation question before any public release).
-
-## Next session: do these in order
-
-1. Confirm Git and Rojo are synchronized (`git status`, `git log origin/feature/full-game-mvp..HEAD`, Rojo plugin connected, script checksums match Studio).
-2. Set maximum server capacity to 8 (Studio Game Settings, or Creator Hub; or grant the MCP `universe.place:write` scope and have it set `serverSize`).
-3. Disable voice chat and VR (Game Settings, or grant `universe:write`).
-4. Verify the private experience settings by reading them back (visibility must be `PRIVATE`; voice chat, VR off; server size 8).
-5. Publish the latest build privately, **only with the owner's explicit approval** (Studio: File > Publish to Roblox).
-6. Invite 3 to 6 friends with the lowest permission that lets them play, preferably an early-testing or invite mechanism, never edit access. Do not make the experience public. Then run the playtest checklist below.
-
-## Playtest checklist
-
-1. Everyone joins; the lobby lists all players.
-2. Players ready up (3 needed); the 15 s countdown runs.
-3. Draw (60 s) and guess (15 s); books rotate; a timeout gives a placeholder.
-4. Use reveal skip; check the vote counter.
-5. Vote; check results and points.
-6. Try a profanity guess (expect `####`) and one late join; include a phone player if possible.
-7. Leave and rejoin; points and packs persist.
-8. Play a second match without restarting the server.
-
-## Cleanup
-
-* Studio place is clean. Test drivers are temporary ModuleScripts MCP creates in `ReplicatedStorage` per run; delete after each run.
-* Dev DataStore records (`DoodleDisaster_PlayerData_Dev_v1`, `DoodleDisaster_DevTest_v1`) are harmless test data.
-
-## Future idea (recorded in GAME_DESIGN.md, do not build yet)
-
-"The Doodle Disaster Incident": a harmless, absurd Easter egg at 0.00001% per match. Server-authoritative roll; reduced-scares accessibility option; no strobing or intense flashes; moderate volume; must not interrupt active drawing; no gameplay advantage or exclusive reward.
+1. Everyone votes for a mode; change a vote; one player sits out and tries to vote.
+2. The projector announces the winning mode; the sound is audible but not loud.
+3. A guess of plain profanity becomes a random phrase and the next player draws it; a normal guess passes.
+4. Hide a drawing on the guess screen, in the reveal and in voting; it stays hidden in results.
+5. Report a drawing (two taps); that artist's later drawings show as hidden for the reporter only.
+6. One player leaves mid-match and rejoins through a friend; they get their desk and page back. Leave again and stay away; the match finishes with two.
+7. A late joiner spectates and plays the next match.
+8. 25 s guessing: too long, too short?
+9. Play three matches in a row; points and packs persist after rejoining.
 
 ## Rules in force
 
-No push, merge to `main` or publish without the owner's approval. The owner may commit from VS Code, so check `git status` and `git log` before editing. Lua scripts are edited only in local files (Rojo owns the script folders). Test with `StudioTestService:ExecuteMultiplayerTestAsync(n, args)`; do not `require` server services from MCP `execute_luau` (it duplicates the `Remotes` folder); test clients have no `loadstring`, so attach drivers by `require`ing a ModuleScript. Use only the dev DataStore.
+No push, merge to `main`, publish, visibility or permission change without the owner's approval. No monetization. Lua scripts are edited only in local files (Rojo owns the script folders). Studio uses only dev DataStores (`..._PlayerData_Dev_v1`, `..._Reports_Dev_v1`); the production store is never written. Test with `StudioTestService:ExecuteMultiplayerTestAsync(n, args)`; Studio-only test args: `devMode = false`, `privateServer = true`, `simulateFilter = true` (the word "censorme" is censored). Do not `require` server services from MCP `execute_luau`. Test drivers are temporary ModuleScripts in `ReplicatedStorage`; delete every `__Mcp*` object after each run.
+
+## Cleanup
+
+Studio place is clean (no `__Mcp*` objects). Dev stores hold harmless test data, including three test reports in `DoodleDisaster_Reports_Dev_v1`.
+
+## Postponed (see GAME_DESIGN.md)
+
+Substitute Doodler bot, repeated-quitting cooldowns, moderation review tooling, "The Doodle Disaster Incident" Easter egg, visual polish, custom prompts and all monetization.

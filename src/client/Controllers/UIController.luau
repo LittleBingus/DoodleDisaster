@@ -156,7 +156,7 @@ local function updateLobby()
 	local myVote = if me then me.modeVote else nil
 	for id, button in lobby.modes do
 		local mode = GameConfig.Difficulties[id]
-		button.Text = string.format("%s %s\n%d", mode.Emoji, mode.ShortName, (s.modeVotes and s.modeVotes[id]) or 0)
+		button.Text = string.format("%s %d\n%s", mode.Emoji, (s.modeVotes and s.modeVotes[id]) or 0, mode.ShortName)
 		button.BackgroundColor3 = if myVote == id then T.Yellow else if canVote then T.Blue else T.Grey
 		button.AutoButtonColor = canVote
 	end
@@ -415,6 +415,27 @@ function UIController.showResults(results: { any })
 	Ui.pop(resultsPanel)
 end
 
+-- Keeps the lobby panel (bottom left) and the reaction bar (bottom centre) from overlapping
+-- on narrow screens: the bar slides right when there is room, otherwise the panel moves up.
+local function layoutBottom()
+	local camera = workspace.CurrentCamera
+	local width = if camera then camera.ViewportSize.X else 1280
+	local barWidth = reactionBar.AbsoluteSize.X
+	local panelRight = 10 + lobby.panel.AbsoluteSize.X + 10
+	local lobbyShown = lobby.panel.Visible
+	local centred = width / 2 - barWidth / 2
+	if not lobbyShown or centred >= panelRight then
+		reactionBar.Position = UDim2.new(0.5, 0, 1, -10)
+		lobby.panel.Position = UDim2.new(0, 10, 1, -10)
+	elseif width >= panelRight + barWidth + 10 then
+		reactionBar.Position = UDim2.new(0, panelRight + barWidth / 2, 1, -10)
+		lobby.panel.Position = UDim2.new(0, 10, 1, -10)
+	else
+		reactionBar.Position = UDim2.new(0.5, 0, 1, -10)
+		lobby.panel.Position = UDim2.new(0, 10, 1, -10 - reactionBar.AbsoluteSize.Y - 8)
+	end
+end
+
 -- Main ----------------------------------------------------------------------------------
 local function onStateChanged()
 	local phase = ClientState.phase()
@@ -424,6 +445,7 @@ local function onStateChanged()
 	resultsPanel.Visible = phase == Phases.Results
 	-- Reactions are available whenever players aren't busy at their desks.
 	reactionBar.Visible = not (Phases.Seated[phase] and ClientState.isParticipant())
+	layoutBottom()
 end
 
 function UIController.start()
@@ -437,6 +459,11 @@ function UIController.start()
 	buildResults()
 
 	ClientState.Changed:Connect(onStateChanged)
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(layoutBottom)
+	end
+	layoutBottom()
 	ClientState.ProfileChanged:Connect(updatePacks)
 	ClientState.remote("Notify").OnClientEvent:Connect(function(text, kind)
 		if type(text) == "string" then
