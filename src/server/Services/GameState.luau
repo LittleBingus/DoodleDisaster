@@ -10,6 +10,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.GameConfig)
 local Phases = require(Shared.Phases)
 local Net = require(script.Parent.Net)
+local ModeVote = require(script.Parent.Parent.Logic.ModeVote)
 
 local GameState = {}
 
@@ -22,7 +23,9 @@ GameState.participants = {} :: { [number]: boolean } -- userIds in the current m
 GameState.stations = {} :: { [number]: number } -- userId -> station index
 GameState.ready = {} :: { [number]: boolean }
 GameState.submitted = {} :: { [number]: boolean } -- for "waiting on N players" UI
-GameState.difficulty = GameConfig.DefaultDifficulty
+GameState.difficulty = GameConfig.DefaultDifficulty -- the mode locked for the current / last match
+GameState.modeVote = ModeVote.new(GameConfig.DifficultyOrder, GameConfig.DefaultDifficulty)
+GameState.modeResult = { votes = 0, tie = false } -- how the current mode was chosen (for the announcement)
 GameState.isPrivate = game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0
 GameState.hostUserId = nil :: number?
 GameState.lastAwardText = "No awards yet. Be the first legend!"
@@ -69,11 +72,17 @@ end
 
 function GameState.snapshot()
 	local roster = {}
+	local readyIds = {}
 	for _, p in Players:GetPlayers() do
+		local ready = GameState.ready[p.UserId] ~= false
+		if ready then
+			table.insert(readyIds, p.UserId)
+		end
 		table.insert(roster, {
 			userId = p.UserId,
 			name = p.DisplayName,
-			ready = GameState.ready[p.UserId] ~= false,
+			ready = ready,
+			modeVote = if ready then GameState.modeVote:voteOf(p.UserId) else nil,
 			inMatch = GameState.participants[p.UserId] == true,
 			station = GameState.stations[p.UserId],
 			submitted = GameState.submitted[p.UserId] == true,
@@ -87,6 +96,8 @@ function GameState.snapshot()
 		step = GameState.step,
 		totalSteps = GameState.totalSteps,
 		difficulty = GameState.difficulty,
+		modeVotes = GameState.modeVote:tally(readyIds), -- live lobby tally (ready players only)
+		modeResult = GameState.modeResult,
 		isPrivate = GameState.isPrivate,
 		hostUserId = GameState.hostUserId,
 		minPlayers = GameState.getMinPlayers(),

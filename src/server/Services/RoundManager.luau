@@ -15,6 +15,7 @@ local TextRules = require(Shared.TextRules)
 local Logic = script.Parent.Parent.Logic
 local MatchCore = require(Logic.MatchCore)
 local SkipVote = require(Logic.SkipVote)
+local GuessFallback = require(Logic.GuessFallback)
 
 local GameState = require(script.Parent.GameState)
 local Net = require(script.Parent.Net)
@@ -23,6 +24,7 @@ local StationManager = require(script.Parent.StationManager)
 local VotingManager = require(script.Parent.VotingManager)
 local RewardManager = require(script.Parent.RewardManager)
 local TextFilter = require(script.Parent.TextFilter)
+local ModerationManager = require(script.Parent.ModerationManager)
 
 local RoundManager = {}
 
@@ -30,7 +32,11 @@ local core: any = nil
 local pendingGuess: { [number]: boolean } = {}
 local revealHistory: { any } = {} -- events of the current sketchbook, for late syncs
 local lastResults: any = nil
+local stationOf: { [number]: number } = {} -- desks of this match, so a returning player gets theirs back
+local usedFallbacks: { [string]: boolean } = {}
+local fallbackRng = Random.new()
 local skipStatus: () -> any -- defined with the reveal code below
+local sendReveal: (Player, any) -> ()
 
 local function participantsPresent(): { Player }
 	local out = {}
@@ -55,6 +61,11 @@ function RoundManager.sendTask(player: Player)
 		t.endsAt = GameState.endsAt
 		t.station = GameState.stations[player.UserId]
 		t.matchId = GameState.matchId -- lets clients tell step N of this match from step N of the last one
+		if t.drawId and ModerationManager.hiddenFor(player.UserId, t.drawId) then
+			-- The player reported this artist earlier: they get a placeholder to guess from.
+			t.drawing = DrawingTypes.empty()
+			t.hidden = true
+		end
 		Net.fire(player, "TaskAssigned", t)
 	end
 end
@@ -63,13 +74,13 @@ function RoundManager.syncPlayer(player: Player)
 	RoundManager.sendTask(player)
 	if GameState.phase == Phases.Reveal then
 		for _, ev in revealHistory do
-			Net.fire(player, "RevealEvent", ev)
+			sendReveal(player, ev)
 		end
 		Net.fire(player, "RevealSkipStatus", skipStatus())
 	elseif GameState.phase == Phases.AwardVoting then
 		VotingManager.sendBallot(player)
 	elseif GameState.phase == Phases.Results and lastResults then
-		Net.fire(player, "VotingClosed", lastResults)
+		Net.fire(player, "VotingClosed", VotingManager.resultsFor(player, lastResults))
 	end
 end
 
@@ -96,9 +107,23 @@ local function waitForSubmissions(duration: number): boolean
 	return true
 end
 
+-- Reveal steps are sent per player so a drawing by an artist the viewer reported arrives
+-- without its strokes (the client shows a placeholder).
+function sendReveal(player: Player, ev: any)
+	if ev.type == "Entry" and ev.kind == "Draw" and ModerationManager.hiddenFor(player.UserId, ev.drawId) then
+		local copy = table.clone(ev)
+		copy.content = nil
+		copy.hidden = true
+		ev = copy
+	end
+	Net.fire(player, "RevealEvent", ev)
+end
+
 local function broadcastReveal(ev: any)
 	table.insert(revealHistory, ev)
-	Net.fireAll("RevealEvent", ev)
+	for _, player in Players:GetPlayers() do
+		sendReveal(player, ev)
+	end
 end
 
 -- Fast-forward voting ----------------------------------------------------------------------
@@ -184,6 +209,8 @@ local function runReveal()
 					kind = entry.kind,
 					content = entry.content,
 					auto = entry.auto,
+					fallback = entry.fallback,
+					drawId = entry.id,
 				})
 				if revealWait(entryTime) then
 					break
@@ -192,8 +219,9 @@ local function runReveal()
 		end
 		-- The "started as / ended as" card always shows, even after a skip.
 		skipVotes:reset("Book")
+		local last = book.entries[#book.entries]
 		broadcastReveal({ type = "BookEnd", bookIndex = b, bookCount = n, prompt = book.prompt,
-			final = book.entries[#book.entries] })
+			final = { kind = last.kind, content = if last.kind == "Guess" then last.content else nil } })
 		revealWait(GameConfig.Timers.RevealBookOutro)
 	end
 	revealHistory = {}
@@ -224,6 +252,8 @@ local function finishMatch()
 	StationManager.unlockAll()
 	GameState.setPhase(Phases.ReturningToLobby, GameConfig.Timers.ReturningToLobby)
 	core = nil
+	ModerationManager.setMatch(GameState.matchId, nil)
+	stationOf = {}
 	skipVotes = nil
 	pendingGuess = {}
 	revealHistory = {}
@@ -265,14 +295,17 @@ function RoundManager.runMatch(players: { Player })
 		guessTimeoutText = GameConfig.Guess.TimeoutPlaceholder,
 		guessLeftText = GameConfig.Guess.LeftPlaceholder,
 	})
+	ModerationManager.setMatch(matchId, core)
+	usedFallbacks = {}
 	GameState.totalSteps = n
 	GameState.step = 0
 
 	StationManager.assign(players)
+	stationOf = table.clone(GameState.stations)
+	-- The projector announces the voted mode during this phase (see RevealController).
 	GameState.setPhase(Phases.StartingMatch, GameConfig.Timers.StartingMatch)
 	StationManager.lockAll()
-	Net.notifyAll(string.format("%s • Packs: %s",
-		GameConfig.Difficulties[GameState.difficulty].DisplayName, table.concat(packNames, ", ")), "info")
+	Net.notifyAll("Packs in play: " .. table.concat(packNames, ", "), "info")
 	task.wait(GameConfig.Timers.StartingMatch)
 
 	-- Drawing / guessing rounds
@@ -292,6 +325,8 @@ function RoundManager.runMatch(players: { Player })
 			-- ReturningToLobby already set; finish without re-entering it.
 			StationManager.unlockAll()
 			core = nil
+			ModerationManager.setMatch(matchId, nil)
+			stationOf = {}
 			GameState.participants = {}
 			StationManager.clear()
 			task.wait(GameConfig.Timers.ReturningToLobby)
@@ -367,11 +402,23 @@ local function onSubmitGuess(player: Player, step: any, raw: any)
 	if core ~= activeCore then
 		return
 	end
-	local ok, submitErr = core:submit(uid, step, "Guess", filtered or GameConfig.Guess.FilterFailedPlaceholder)
+	-- A guess the filter censored completely (or that could not be filtered) would turn into
+	-- a "####" drawing prompt. Swap in a developer-written phrase instead. The typed text is
+	-- dropped here: it is never stored, logged or used to choose the replacement.
+	local usable = GuessFallback.isUsable(text :: string, filtered)
+	local content = if usable
+		then filtered :: string
+		else GuessFallback.pick(GameConfig.Guess.FallbackPhrases, usedFallbacks, function()
+			return fallbackRng:NextNumber()
+		end)
+	local ok, submitErr = core:submit(uid, step, "Guess", content, not usable)
 	if ok then
 		GameState.submitted[uid] = true
 		GameState.broadcast()
 		RoundManager.sendTask(player)
+		if not usable then
+			Net.notify(player, "Your guess didn't get past the hall monitor, so the class gremlin wrote a random one instead.", "info")
+		end
 	elseif submitErr ~= "already submitted" then
 		Net.notify(player, "Guess rejected: " .. tostring(submitErr), "warning")
 	end
@@ -382,6 +429,17 @@ function RoundManager.init()
 	Net.on("SubmitDrawing", limit, onSubmitDrawing)
 	Net.on("SubmitGuess", limit, onSubmitGuess)
 	Net.on("RevealSkipVote", GameConfig.RateLimits.RevealSkip, onRevealSkipVote)
+	-- A participant who comes back to this server mid-match picks up from the current page.
+	Players.PlayerAdded:Connect(function(player)
+		if core and core:markReturned(player.UserId) then
+			local index = stationOf[player.UserId]
+			if index then
+				StationManager.restore(player, index)
+			end
+			GameState.broadcast()
+			Net.notifyAll(player.DisplayName .. " is back in class!", "info")
+		end
+	end)
 	Players.PlayerRemoving:Connect(function(player)
 		pendingGuess[player.UserId] = nil
 		if core and core:isParticipant(player.UserId) then

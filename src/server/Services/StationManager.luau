@@ -124,6 +124,22 @@ local function unlockPlayer(player: Player)
 	end
 end
 
+-- Gives a returning participant their desk back (the character is seated when it spawns).
+function StationManager.restore(player: Player, index: number)
+	for userId, taken in GameState.stations do
+		if taken == index and userId ~= player.UserId then
+			return
+		end
+	end
+	if stations[index] then
+		GameState.stations[player.UserId] = index
+		updateLabels()
+		if locked and player.Character then
+			task.spawn(lockPlayer, player)
+		end
+	end
+end
+
 function StationManager.lockAll()
 	locked = true
 	for _, player in Players:GetPlayers() do

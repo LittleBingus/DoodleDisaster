@@ -19,6 +19,7 @@ RemoteDefinitions.Events = {
 	"Notify", -- (text, kind?) toast message
 	"ReactionShown", -- (userId, reactionIndex)
 	"VoteResult", -- (categoryId, candidateId, ok, reason)
+	"ReportResult", -- (drawId, ok, message) answer to ReportDrawing
 	"RevealSkipStatus", -- ({ entry, book, needed, entrySeq, bookSeq }) fast-forward vote tallies
 
 	-- client -> server
@@ -30,7 +31,8 @@ RemoteDefinitions.Events = {
 	"RevealSkipVote", -- (scope: "Entry" | "Book") vote to fast-forward the reveal
 	"SetReady", -- (bool)
 	"HostStart", -- ()
-	"SetDifficulty", -- (difficultyId) host only
+	"VoteDifficulty", -- (difficultyId) one changeable vote per ready player, lobby only
+	"ReportDrawing", -- (drawId) report a drawing of the current match
 	"UnlockPack", -- (packId)
 	"TogglePack", -- (packId, enabled)
 }

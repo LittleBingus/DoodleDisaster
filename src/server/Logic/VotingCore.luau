@@ -43,6 +43,7 @@ function VotingCore.buildBallot(entriesByKind: { [string]: { any } }, categories
 				label = string.format("%s %d", if kind == "Draw" then "Doodle" else "Guess", i),
 				kind = kind,
 				content = e.content,
+				drawId = e.id, -- drawings only: opaque id for hide/report
 			})
 		end
 		poolByKind[kind] = pool

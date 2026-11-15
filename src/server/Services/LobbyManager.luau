@@ -2,12 +2,15 @@
 -- LobbyManager: waiting room, ready toggles, host controls and the start countdown.
 --
 -- Public servers: when enough ready players are present a 15 s countdown starts; it
---   cancels if the count drops below the minimum. The longest-present player is the
---   "class captain" and may change difficulty.
+--   cancels if the count drops below the minimum.
 -- Private servers: the private server owner (or longest-present player if the owner
 --   isn't here) is the host. Nothing starts automatically; the host presses Start once
 --   enough players are present, followed by a short countdown.
 -- Studio dev mode: like public, with a lower minimum, and the host may also start early.
+--
+-- Game mode: every ready player has one changeable vote (ModeVote). The votes of the players
+-- who actually start are tallied when the countdown ends and the result is locked for the
+-- match. The host can start a private match but has no say over the mode beyond their vote.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -22,6 +25,21 @@ local LobbyManager = {}
 
 local joinOrder: { Player } = {}
 local startRequested = false
+local modeRng = Random.new()
+
+-- Tallies the starters' votes and locks the mode for the match about to begin.
+local function lockMode(starters: { Player })
+	local ids = {}
+	for _, p in starters do
+		table.insert(ids, p.UserId)
+	end
+	local winner, info = GameState.modeVote:pick(ids, function()
+		return modeRng:NextNumber()
+	end)
+	GameState.difficulty = winner
+	GameState.modeResult = { votes = info.votes, tie = #info.tied > 1 }
+	GameState.modeVote:clear() -- everyone votes afresh for the next match
+end
 
 local function refreshHost()
 	local host: Player? = nil
@@ -82,6 +100,7 @@ function LobbyManager.waitForStart(): { Player }
 				GameState.setTimer(3)
 				startRequested = false
 			elseif GameState.timeLeft() <= 0 then
+				lockMode(eligible)
 				return eligible
 			end
 		end
@@ -104,6 +123,7 @@ function LobbyManager.init()
 			table.remove(joinOrder, i)
 		end
 		GameState.ready[p.UserId] = nil
+		GameState.modeVote:remove(p.UserId)
 		refreshHost()
 		GameState.broadcast()
 	end)
@@ -137,20 +157,18 @@ function LobbyManager.init()
 		startRequested = true
 	end)
 
-	Net.on("SetDifficulty", limit, function(player, difficultyId)
-		if not LobbyManager.isHost(player) then
+	Net.on("VoteDifficulty", limit, function(player, difficultyId)
+		if GameState.phase ~= Phases.WaitingForPlayers and GameState.phase ~= Phases.Countdown then
+			Net.notify(player, "The mode is locked until the next class.", "info")
 			return
 		end
-		if type(difficultyId) ~= "string" or not GameConfig.Difficulties[difficultyId] then
+		if GameState.ready[player.UserId] == false then
+			Net.notify(player, "Sitting-out students can't vote. Tap Ready to join in!", "info")
 			return
 		end
-		if Phases.InMatch[GameState.phase] then
-			Net.notify(player, "Difficulty can be changed between matches.", "info")
-			return
+		if GameState.modeVote:cast(player.UserId, difficultyId) then
+			GameState.broadcast()
 		end
-		GameState.difficulty = difficultyId
-		GameState.broadcast()
-		Net.notifyAll("Difficulty set to " .. GameConfig.Difficulties[difficultyId].DisplayName .. "!", "info")
 	end)
 end
 

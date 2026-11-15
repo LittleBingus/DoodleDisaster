@@ -160,6 +160,111 @@ return function(t)
 		t.eq(core.activeSubmissions[ids[2]], 1)
 	end)
 
+	t.test("a player who rejoins resumes from the current step", function()
+		local core, ids = newCore(3)
+		for _, uid in ids do
+			core:submit(uid, 0, "Draw", sketch(uid))
+		end
+		core:finalizeStep()
+		core:markLeft(ids[2])
+		t.eq(core:connectedCount(), 2, "the match carries on with two")
+		core:submit(ids[1], 1, "Guess", "a")
+		t.falsy(core:markReturned(999), "outsiders can't join a running match")
+		t.truthy(core:markReturned(ids[2]))
+		t.falsy(core:markReturned(ids[2]), "already back")
+		t.eq(core:connectedCount(), 3)
+		local task = core:getTask(ids[2])
+		t.eq(task.step, 1)
+		t.falsy(core:allSubmitted(), "the returning player is waited for again")
+		t.truthy((core:submit(ids[2], 1, "Guess", "b")))
+		t.truthy((core:submit(ids[3], 1, "Guess", "c")))
+		t.truthy(core:allSubmitted())
+		core:finalizeStep()
+		for _, book in core.books do
+			t.eq(#book.entries, 2, "rotation stays consistent: one entry per book per step")
+		end
+	end)
+
+	t.test("a step filled in while a player was away is not rewritten when they return", function()
+		local core, ids = newCore(3)
+		core:markLeft(ids[2])
+		core:submit(ids[1], 0, "Draw", sketch(1))
+		core:submit(ids[3], 0, "Draw", sketch(3))
+		core:finalizeStep()
+		core:markReturned(ids[2])
+		local book = core:bookIndexFor(ids[2], 0)
+		t.truthy(core.books[book].entries[1].auto)
+		t.falsy((core:submit(ids[2], 0, "Draw", sketch(2))), "old step is closed")
+		t.eq(core.activeSubmissions[ids[2]], 0)
+	end)
+
+	t.test("a replaced guess continues the chain but is never an award candidate", function()
+		local core, ids = newCore(3)
+		for _, uid in ids do
+			core:submit(uid, 0, "Draw", sketch(uid))
+		end
+		core:finalizeStep()
+		t.truthy((core:submit(ids[1], 1, "Guess", "a potato with a law degree", true)))
+		core:submit(ids[2], 1, "Guess", "real guess")
+		core:submit(ids[3], 1, "Guess", "another guess")
+		core:finalizeStep()
+		local book = core:bookIndexFor(ids[1], 1)
+		t.truthy(core.books[book].entries[2].fallback)
+		t.falsy(core.books[book].entries[2].auto)
+		-- whoever draws in that book next is asked to draw the replacement phrase
+		local drawer
+		for _, uid in ids do
+			if core:bookIndexFor(uid) == book then
+				drawer = uid
+			end
+		end
+		t.eq(core:getTask(drawer).text, "a potato with a law degree")
+		t.eq(#core:getEntries("Guess"), 2, "the replacement is not votable")
+		t.eq(core.activeSubmissions[ids[1]], 2, "the player still gets credit for taking part")
+		local revealed = core:getRevealBooks()[book].entries[2]
+		t.truthy(revealed.fallback)
+	end)
+
+	t.test("every drawing gets a unique opaque id that resolves to its author on the server only", function()
+		local core, ids = playFull(t, 4)
+		local seen, count = {}, 0
+		for b, book in core:getRevealBooks() do
+			for j, e in book.entries do
+				if e.kind == "Draw" then
+					t.truthy(type(e.id) == "string")
+					t.falsy(seen[e.id], "ids are unique")
+					seen[e.id] = true
+					count += 1
+					local info = core:getDrawing(e.id)
+					t.eq(info.author, core.books[b].entries[j].author)
+					t.eq(info.bookIndex, b)
+					t.eq(info.entryIndex, j)
+					t.falsy(e.id:find(tostring(info.author), 1, true), "id does not contain the author")
+				else
+					t.eq(e.id, nil)
+				end
+			end
+		end
+		t.eq(count, 8)
+		t.eq(core:getDrawing("nope"), nil)
+		t.eq(core:getDrawing(42), nil)
+		for _, e in core:getEntries("Draw") do
+			t.truthy(seen[e.id], "ballot entries carry the same id")
+		end
+	end)
+
+	t.test("the guesser is told the id of the drawing in front of them", function()
+		local core, ids = newCore(3)
+		for _, uid in ids do
+			core:submit(uid, 0, "Draw", sketch(uid))
+		end
+		core:finalizeStep()
+		local task = core:getTask(ids[1])
+		t.eq(task.kind, "Guess")
+		local info = core:getDrawing(task.drawId)
+		t.truthy(info and info.author ~= ids[1])
+	end)
+
 	t.test("reveal data contains no author ids", function()
 		local core, ids = playFull(t, 3)
 		local books = core:getRevealBooks()

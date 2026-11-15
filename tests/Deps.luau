@@ -19,4 +19,7 @@ return {
 	RateLimiter = require(Logic.RateLimiter),
 	SkipVote = require(Logic.SkipVote),
 	ProfileSaver = require(Logic.ProfileSaver),
+	ModeVote = require(Logic.ModeVote),
+	GuessFallback = require(Logic.GuessFallback),
+	ReportLog = require(Logic.ReportLog),
 }

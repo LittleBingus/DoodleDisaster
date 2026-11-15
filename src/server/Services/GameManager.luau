@@ -16,6 +16,7 @@ local PlayerDataManager = require(script.Parent.PlayerDataManager)
 local LobbyManager = require(script.Parent.LobbyManager)
 local RoundManager = require(script.Parent.RoundManager)
 local VotingManager = require(script.Parent.VotingManager)
+local ModerationManager = require(script.Parent.ModerationManager)
 local ClassroomInteractionManager = require(script.Parent.ClassroomInteractionManager)
 
 local GameManager = {}
@@ -54,6 +55,7 @@ function GameManager.start()
 	LobbyManager.init()
 	RoundManager.init()
 	VotingManager.init()
+	ModerationManager.init()
 	ClassroomInteractionManager.init(classroom)
 
 	Players.PlayerAdded:Connect(function()

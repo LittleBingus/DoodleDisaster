@@ -6,9 +6,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local DrawingRenderer = require(Shared.DrawingRenderer)
 local ClientState = require(script.Parent.ClientState)
 local Ui = require(script.Parent.Ui)
+local DrawingGuard = require(script.Parent.DrawingGuard)
 
 local T = Ui.Theme
 local VotingController = {}
@@ -67,8 +67,8 @@ local function showCategory(categoryId: string)
 		local holder = Ui.new("Frame", { Position = UDim2.fromScale(0.04, 0.04), Size = UDim2.fromScale(0.92, 0.72),
 			BackgroundTransparency = 1, Parent = card })
 		if c.kind == "Draw" then
-			local canvas = DrawingRenderer.makeCanvas({ Parent = holder })
-			DrawingRenderer.render(canvas, c.content)
+			DrawingGuard.mount(holder, c.content, { drawId = c.drawId, serverHidden = c.hidden == true,
+				controls = not isMine, compact = true })
 		else
 			Ui.label("“" .. tostring(c.content) .. "”", { MaxTextSize = 26, Parent = holder })
 		end

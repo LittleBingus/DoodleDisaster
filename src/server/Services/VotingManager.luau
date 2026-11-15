@@ -13,6 +13,7 @@ local Phases = require(Shared.Phases)
 local VotingCore = require(script.Parent.Parent.Logic.VotingCore)
 local GameState = require(script.Parent.GameState)
 local Net = require(script.Parent.Net)
+local ModerationManager = require(script.Parent.ModerationManager)
 
 local VotingManager = {}
 
@@ -29,13 +30,46 @@ local function ballotFor(player: Player)
 			table.insert(mine, cid)
 		end
 	end
+	-- Drawings by an artist this player reported are sent without their strokes.
+	local candidates = {}
+	for cid, c in publicBallot.candidates do
+		if c.kind == "Draw" and ModerationManager.isBlocked(player.UserId, authorOfCurrent[cid]) then
+			local copy = table.clone(c)
+			copy.content = nil
+			copy.hidden = true
+			candidates[cid] = copy
+		else
+			candidates[cid] = c
+		end
+	end
 	return {
 		categories = publicBallot.categories,
-		candidates = publicBallot.candidates,
+		candidates = candidates,
 		mine = mine,
 		canVote = session ~= nil and session.voters[player.UserId] == true,
 		endsAt = GameState.endsAt,
 	}
+end
+
+-- The results as this player should see them: winning drawings by an artist they reported
+-- are replaced by a placeholder.
+function VotingManager.resultsFor(player: Player, display: { any }): { any }
+	local out = {}
+	for i, r in display do
+		local winners = {}
+		for j, w in r.winners do
+			if w.kind == "Draw" and ModerationManager.hiddenFor(player.UserId, w.drawId) then
+				local copy = table.clone(w)
+				copy.content = nil
+				copy.hidden = true
+				winners[j] = copy
+			else
+				winners[j] = w
+			end
+		end
+		out[i] = { displayName = r.displayName, votes = r.votes, winners = winners }
+	end
+	return out
 end
 
 function VotingManager.sendBallot(player: Player)
@@ -95,6 +129,7 @@ function VotingManager.run(core: any, voters: { Player })
 				label = c.label,
 				kind = c.kind,
 				content = c.content,
+				drawId = c.drawId,
 				authorName = (author and knownNames[author]) or "A mysterious artist",
 			})
 		end
@@ -103,7 +138,9 @@ function VotingManager.run(core: any, voters: { Player })
 	session = nil
 	publicBallot = nil
 	authorOfCurrent = {}
-	Net.fireAll("VotingClosed", display)
+	for _, p in Players:GetPlayers() do
+		Net.fire(p, "VotingClosed", VotingManager.resultsFor(p, display))
+	end
 	return display, awardCounts
 end
 

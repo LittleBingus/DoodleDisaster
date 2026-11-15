@@ -10,9 +10,9 @@ local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.GameConfig)
 local Phases = require(Shared.Phases)
-local DrawingRenderer = require(Shared.DrawingRenderer)
 local ClientState = require(script.Parent.ClientState)
 local Ui = require(script.Parent.Ui)
+local DrawingGuard = require(script.Parent.DrawingGuard)
 
 local T = Ui.Theme
 local UIController = {}
@@ -24,6 +24,7 @@ local packsModal: Frame
 local toastStack: Frame
 local waitingPanel: Frame
 local waitingText: TextLabel
+local waitingTitle: TextLabel
 local spectatorBanner: Frame
 local reactionBar: Frame
 local resultsPanel: Frame
@@ -72,7 +73,10 @@ local function updateHud()
 	hud.phase.Text = s.phaseName or s.phase
 	local count = #s.roster
 	local diff = GameConfig.Difficulties[s.difficulty]
-	local sub = string.format("%d/%d students • %s", count, s.maxPlayers, diff and diff.DisplayName or s.difficulty)
+	local inLobbyNow = s.phase == Phases.WaitingForPlayers or s.phase == Phases.Countdown
+	-- In the lobby the mode is still being voted on; during a match it is locked.
+	local sub = string.format("%d/%d students • %s", count, s.maxPlayers,
+		if inLobbyNow then "Vote for a mode!" else (diff and diff.DisplayName or s.difficulty))
 	if s.totalSteps and s.totalSteps > 0 and Phases.Seated[s.phase] then
 		sub = string.format("Page %d of %d • %s", s.step + 1, s.totalSteps, sub)
 	end
@@ -90,7 +94,7 @@ end
 -- Lobby ---------------------------------------------------------------------------------
 local function buildLobby()
 	local panel = Ui.panel({ Name = "Lobby", AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 10, 1, -10),
-		Size = UDim2.fromOffset(260, 210), BackgroundColor3 = T.Paper, Parent = gui })
+		Size = UDim2.fromOffset(260, 236), BackgroundColor3 = T.Paper, Parent = gui })
 	Ui.padding(10).Parent = panel
 	Ui.list(Enum.FillDirection.Vertical, 6).Parent = panel
 	lobby.panel = panel
@@ -101,19 +105,21 @@ local function buildLobby()
 		local ready = if me then not me.ready else true
 		ClientState.remote("SetReady"):FireServer(ready)
 	end, { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 2, Parent = panel })
-	lobby.difficulty = Ui.button("Mixed Madness", T.Blue, function()
-		if not ClientState.isHost() then
-			return
-		end
-		local order = GameConfig.DifficultyOrder
-		local current = table.find(order, ClientState.snapshot.difficulty) or 1
-		ClientState.remote("SetDifficulty"):FireServer(order[current % #order + 1])
-	end, { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 3, Parent = panel })
+	-- Mode vote: one changeable vote per ready player; the class decides, not the host.
+	lobby.hint = Ui.label("Vote for the game mode:", { Size = UDim2.new(1, 0, 0, 16),
+		LayoutOrder = 3, Font = T.BodyFont, MaxTextSize = 13, TextColor3 = Color3.fromRGB(90, 90, 100), Parent = panel })
+	local voteRow = Ui.new("Frame", { Name = "ModeVote", Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1,
+		LayoutOrder = 4, Parent = panel })
+	Ui.list(Enum.FillDirection.Horizontal, 6).Parent = voteRow
+	lobby.modes = {}
+	for i, id in GameConfig.DifficultyOrder do
+		lobby.modes[id] = Ui.button(GameConfig.Difficulties[id].ShortName, T.Grey, function()
+			ClientState.remote("VoteDifficulty"):FireServer(id)
+		end, { Name = id, Size = UDim2.new(1 / 3, -4, 1, 0), LayoutOrder = i, MaxTextSize = 15, Parent = voteRow })
+	end
 	lobby.start = Ui.button("🚀 Start class", T.Orange, function()
 		ClientState.remote("HostStart"):FireServer()
-	end, { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 4, Parent = panel })
-	lobby.hint = Ui.label("Walk around! Try the button... if you dare.", { Size = UDim2.new(1, 0, 0, 20),
-		LayoutOrder = 5, Font = T.BodyFont, MaxTextSize = 13, TextColor3 = Color3.fromRGB(90, 90, 100), Parent = panel })
+	end, { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 5, Parent = panel })
 end
 
 local function updateLobby()
@@ -146,11 +152,18 @@ local function updateLobby()
 	end
 	lobby.ready.Text = if me and me.ready then "✅ Ready" else "💤 Sitting out"
 	lobby.ready.BackgroundColor3 = if me and me.ready then T.Green else T.Grey
-	local diff = GameConfig.Difficulties[s.difficulty]
-	lobby.difficulty.Text = (if isHost then "🎚 " else "") .. (diff and diff.DisplayName or s.difficulty)
-	lobby.difficulty.AutoButtonColor = isHost
+	local canVote = me ~= nil and me.ready
+	local myVote = if me then me.modeVote else nil
+	for id, button in lobby.modes do
+		local mode = GameConfig.Difficulties[id]
+		button.Text = string.format("%s %s\n%d", mode.Emoji, mode.ShortName, (s.modeVotes and s.modeVotes[id]) or 0)
+		button.BackgroundColor3 = if myVote == id then T.Yellow else if canVote then T.Blue else T.Grey
+		button.AutoButtonColor = canVote
+	end
+	lobby.hint.Text = if not canVote then "Sitting out: no vote this round."
+		elseif myVote then "Voted! Tap another to change."
+		else "Vote for the game mode:"
 	lobby.start.Visible = isHost and (s.isPrivate or s.devMode)
-	lobby.hint.Text = if isHost then "You're the class captain: tap difficulty to change it." else "Walk around! Try the button... if you dare."
 end
 
 -- Packs ---------------------------------------------------------------------------------
@@ -263,7 +276,7 @@ local function buildWaiting()
 	waitingPanel = Ui.panel({ Name = "Waiting", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
 		Size = UDim2.fromOffset(420, 170), BackgroundColor3 = T.Paper, Visible = false, Parent = gui })
 	Ui.padding(14).Parent = waitingPanel
-	Ui.label("✏️ Pencils down!", { Size = UDim2.new(1, 0, 0.5, 0), MaxTextSize = 34, Parent = waitingPanel })
+	waitingTitle = Ui.label("✏️ Pencils down!", { Size = UDim2.new(1, 0, 0.5, 0), MaxTextSize = 34, Parent = waitingPanel })
 	waitingText = Ui.label("Waiting for classmates...", { Size = UDim2.new(1, 0, 0.45, 0), Position = UDim2.fromScale(0, 0.55),
 		Font = T.BodyFont, MaxTextSize = 20, Parent = waitingPanel })
 
@@ -288,8 +301,11 @@ function UIController.refreshWaiting()
 	if not s then
 		return
 	end
+	waitingTitle.Text = if phase == Phases.StartingMatch then "THE CLASS HAS CHOSEN:" else "✏️ Pencils down!"
 	if phase == Phases.StartingMatch then
-		waitingText.Text = "Grab a pencil. Sketchbooks incoming!"
+		local mode = GameConfig.Difficulties[s.difficulty]
+		waitingText.Text = if mode then string.format("%s %s!\n%s", mode.Emoji, string.upper(mode.DisplayName), mode.Subtitle)
+			else "Grab a pencil. Sketchbooks incoming!"
 	elseif collecting then
 		waitingText.Text = "Passing sketchbooks to the next desk..."
 	else
@@ -380,9 +396,8 @@ function UIController.showResults(results: { any })
 		local holder = Ui.new("Frame", { Position = UDim2.new(0, 0, 0, 36), Size = UDim2.new(1, 0, 0.6, 0),
 			BackgroundTransparency = 1, ZIndex = 13, Parent = card })
 		if winner.kind == "Draw" then
-			local canvas = DrawingRenderer.makeCanvas({ ZIndex = 13 })
-			canvas.Parent = holder
-			DrawingRenderer.render(canvas, winner.content)
+			DrawingGuard.mount(holder, winner.content, { drawId = winner.drawId, serverHidden = winner.hidden == true,
+				controls = true, compact = true, zIndex = 13 })
 		else
 			local bubble = Ui.panel({ Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 13,
 				Parent = holder })
@@ -426,6 +441,11 @@ function UIController.start()
 	ClientState.remote("Notify").OnClientEvent:Connect(function(text, kind)
 		if type(text) == "string" then
 			UIController.toast(text, kind)
+		end
+	end)
+	ClientState.remote("ReportResult").OnClientEvent:Connect(function(_drawId, ok, message)
+		if type(message) == "string" then
+			UIController.toast(message, if ok then "success" else "warning")
 		end
 	end)
 	ClientState.remote("VotingClosed").OnClientEvent:Connect(function(results)

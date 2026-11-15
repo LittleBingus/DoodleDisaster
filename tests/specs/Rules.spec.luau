@@ -29,6 +29,32 @@ return function(t)
 		t.eq(GameConfig.StudioDataStoreName, "DoodleDisaster_PlayerData_Dev_v1")
 	end)
 
+	t.test("alpha-feedback timers: 60 s drawing, 25 s guessing baseline", function()
+		t.eq(GameConfig.Timers.Drawing, 60)
+		t.eq(GameConfig.Timers.Guessing, 25)
+	end)
+
+	t.test("every mode has a name, a subtitle and prompt weights", function()
+		t.eq(#GameConfig.DifficultyOrder, 3)
+		for _, id in GameConfig.DifficultyOrder do
+			local mode = GameConfig.Difficulties[id]
+			t.truthy(mode and mode.DisplayName and mode.ShortName and mode.Emoji)
+			t.truthy(#mode.Subtitle > 10)
+			t.truthy(mode.Weights.Easy and mode.Weights.Medium and mode.Weights.Hard)
+		end
+		t.truthy(GameConfig.Difficulties[GameConfig.DefaultDifficulty])
+	end)
+
+	t.test("report store is separate from every progression store", function()
+		local m = GameConfig.Moderation
+		for _, name in { m.ReportStoreName, m.StudioReportStoreName } do
+			t.truthy(name ~= GameConfig.ProductionDataStoreName)
+			t.truthy(name ~= GameConfig.AlphaDataStoreName)
+			t.truthy(name ~= GameConfig.StudioDataStoreName)
+		end
+		t.truthy(m.ReportStoreName ~= m.StudioReportStoreName)
+	end)
+
 	t.test("full phase loop is allowed and returns to the lobby", function()
 		local path = { "WaitingForPlayers", "Countdown", "StartingMatch", "Drawing", "CollectingSubmissions", "Guessing",
 			"CollectingSubmissions", "Drawing", "CollectingSubmissions", "Reveal", "AwardVoting", "Results",

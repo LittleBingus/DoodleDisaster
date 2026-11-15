@@ -7,17 +7,15 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.GameConfig)
-local DrawingRenderer = require(Shared.DrawingRenderer)
-local DrawingTypes = require(Shared.DrawingTypes)
 local ClientState = require(script.Parent.ClientState)
 local Ui = require(script.Parent.Ui)
+local DrawingGuard = require(script.Parent.DrawingGuard)
 
 local T = Ui.Theme
 local GuessController = {}
 
 local gui: ScreenGui
-local canvas: Frame
-local blankNote: TextLabel
+local area: Frame
 local box: TextBox
 local timerLabel: TextLabel
 local counter: TextLabel
@@ -48,13 +46,8 @@ local function build()
 	timerLabel = Ui.label("30", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(0.98, 0),
 		Size = UDim2.new(0.16, 0, 1, 0), MaxTextSize = 40, Parent = header })
 
-	local area = Ui.new("Frame", { Position = UDim2.new(0.05, 0, 0, 82), Size = UDim2.new(0.9, 0, 1, -200),
+	area = Ui.new("Frame", { Position = UDim2.new(0.05, 0, 0, 82), Size = UDim2.new(0.9, 0, 1, -200),
 		BackgroundTransparency = 1, Parent = root })
-	canvas = DrawingRenderer.makeCanvas({ Parent = area })
-	Ui.stroke(4).Parent = canvas
-	blankNote = Ui.label("(a blank page... interpret the void)", { Size = UDim2.fromScale(1, 0.2),
-		Position = UDim2.fromScale(0, 0.4), TextColor3 = Color3.fromRGB(150, 150, 160), MaxTextSize = 28, Visible = false,
-		ZIndex = 5, Parent = canvas })
 
 	local row = Ui.panel({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -14),
 		Size = UDim2.new(0.9, 0, 0, 92), Parent = root })
@@ -96,11 +89,18 @@ function GuessController.open(t: any)
 	if isNew then
 		submitted = false
 		box.Text = ""
-		DrawingRenderer.render(canvas, t.drawing)
-		blankNote.Visible = type(t.drawing) ~= "table" or DrawingTypes.isBlank(t.drawing)
+		Ui.clear(area, { "UIScale" })
+		-- A hidden or reported drawing still needs a guess: anything goes.
+		DrawingGuard.mount(area, t.drawing, {
+			drawId = t.drawId,
+			serverHidden = t.hidden == true,
+			controls = true,
+			blankText = "(a blank page... interpret the void)",
+			stroke = 4,
+		})
 	end
 	gui.Enabled = true
-	Ui.pop(canvas.Parent :: GuiObject)
+	Ui.pop(area)
 	task.defer(function()
 		box:CaptureFocus()
 	end)

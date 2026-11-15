@@ -6,13 +6,15 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local DrawingRenderer = require(Shared.DrawingRenderer)
-local DrawingTypes = require(Shared.DrawingTypes)
+local GameConfig = require(Shared.GameConfig)
 local ClientState = require(script.Parent.ClientState)
 local UIController = require(script.Parent.UIController)
 local Ui = require(script.Parent.Ui)
+local DrawingGuard = require(script.Parent.DrawingGuard)
 
 local T = Ui.Theme
 local RevealController = {}
@@ -88,15 +90,16 @@ local function bubble(view: View, text: string, color: Color3)
 	Ui.pop(b)
 end
 
-local function drawing(view: View, data: any)
+local function drawing(view: View, ev: any)
 	Ui.clear(view.stage)
-	local canvas = DrawingRenderer.makeCanvas({ Parent = view.stage })
-	Ui.stroke(4).Parent = canvas
-	DrawingRenderer.render(canvas, data)
-	if type(data) ~= "table" or DrawingTypes.isBlank(data) then
-		Ui.label("(the artist stared at the blank page...)", { Size = UDim2.fromScale(1, 0.2), Position = UDim2.fromScale(0, 0.4),
-			TextColor3 = Color3.fromRGB(150, 150, 160), MaxTextSize = 40, ZIndex = 5, Parent = canvas })
-	end
+	-- Hide / Report sit on the overlay only; the projector follows the same hidden state.
+	local canvas = DrawingGuard.mount(view.stage, ev.content, {
+		drawId = ev.drawId,
+		serverHidden = ev.hidden == true,
+		controls = view == overlay,
+		blankText = "(the artist stared at the blank page...)",
+		stroke = 4,
+	})
 	Ui.pop(canvas)
 end
 
@@ -123,8 +126,12 @@ local function onEvent(ev: any)
 	elseif ev.type == "Entry" then
 		applyToViews(function(v)
 			if ev.kind == "Draw" then
-				drawing(v, ev.content)
+				drawing(v, ev)
 				v.caption.Text = if ev.entryIndex == 1 then "...which was drawn as:" else "...which became:"
+			elseif ev.fallback then
+				-- The filter blocked the real guess; the server picked a random phrase.
+				bubble(v, "“" .. tostring(ev.content) .. "”", T.Orange)
+				v.caption.Text = "🎲 ...the hall monitor ate the guess, so the gremlin wrote:"
 			else
 				bubble(v, "“" .. tostring(ev.content) .. "”", if ev.auto then T.Grey else T.Blue)
 				v.caption.Text = "...which someone guessed was:"
@@ -168,6 +175,55 @@ local function showIdleProjector()
 	bubble(projector, if s then (s.phaseName or s.phase) else "Welcome!", T.Yellow)
 	projector.caption.Text = "✏️ Draw badly. Guess wildly. Laugh loudly."
 	Ui.clear(projector.dots, { "UIListLayout" })
+end
+
+-- Mode announcement ------------------------------------------------------------------------
+-- Shown on the projector while sketchbooks are handed out (StartingMatch), so it adds no
+-- time to the match. A short sound and a gentle tint of the room go with it.
+local MODE_STYLE = {
+	CasualChaos = { color = T.Green, tint = Color3.fromRGB(255, 244, 205), speed = 1.15 },
+	MixedMadness = { color = T.Yellow, tint = Color3.fromRGB(232, 222, 255), speed = 1 },
+	BrainMeltdown = { color = T.Red, tint = Color3.fromRGB(255, 190, 190), speed = 0.72 },
+}
+local announcedMatch = -1
+local tintEffect: ColorCorrectionEffect? = nil
+local announceSound: Sound? = nil
+
+local function announceMode(snapshot: any)
+	if announcedMatch == snapshot.matchId then
+		return
+	end
+	local mode = GameConfig.Difficulties[snapshot.difficulty]
+	local style = MODE_STYLE[snapshot.difficulty] or MODE_STYLE.MixedMadness
+	if not mode or not projector then
+		return
+	end
+	announcedMatch = snapshot.matchId
+	local view = projector :: View
+	view.title.Text = "THE CLASS HAS CHOSEN:"
+	bubble(view, string.format("%s %s!", mode.Emoji, string.upper(mode.DisplayName)), style.color)
+	local result = snapshot.modeResult
+	view.caption.Text = if result and result.votes == 0 then "Nobody voted, so the teacher picked. " .. mode.Subtitle
+		elseif result and result.tie then "It was a tie! " .. mode.Subtitle
+		else mode.Subtitle
+	Ui.clear(view.dots, { "UIListLayout" })
+	if not announceSound then
+		announceSound = Ui.new("Sound", { Name = "ModeAnnouncement", SoundId = "rbxasset://sounds/victory.wav", Volume = 0.45,
+			Parent = SoundService })
+	end
+	local sound = announceSound :: Sound
+	sound.PlaybackSpeed = style.speed
+	sound:Play()
+	-- One slow fade in and out: no flashing.
+	if not tintEffect then
+		tintEffect = Ui.new("ColorCorrectionEffect", { Name = "ModeTint", Parent = Lighting })
+	end
+	local effect = tintEffect :: ColorCorrectionEffect
+	TweenService:Create(effect, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { TintColor = style.tint }):Play()
+	task.delay(2.4, function()
+		TweenService:Create(effect, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+			{ TintColor = Color3.new(1, 1, 1) }):Play()
+	end)
 end
 
 function RevealController.start()
@@ -219,7 +275,9 @@ function RevealController.start()
 	ClientState.Changed:Connect(function(snapshot)
 		if snapshot.phase ~= "Reveal" then
 			gui.Enabled = false
-			if snapshot.phase ~= "AwardVoting" then
+			if snapshot.phase == "StartingMatch" then
+				announceMode(snapshot)
+			elseif snapshot.phase ~= "AwardVoting" then
 				showIdleProjector()
 			end
 		end
